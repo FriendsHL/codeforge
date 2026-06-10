@@ -69,6 +69,17 @@ M1 是最薄的端到端打通，后面每步在其上叠加。
 
 ---
 
+## v2 里程碑（v1 交付后，顺序可再议）
+
+- **M7 — 能上网**：web_fetch / web_search 工具（agent 查文档、搜报错）；
+  之后可加内嵌浏览器面板预览 localhost
+- **M8 — 能装技能**：skill 加载机制（SKILL.md 指令包，按需注入 prompt），
+  对接 skillForge 技能库，两个项目打通
+- **M9 — 能接生态**：MCP client（rmcp SDK），外部 MCP server 的工具
+  动态注册进 tool registry
+
+> v1 期间为此预留的接缝：tool registry 多来源设计（M2）、system prompt 分段组装（M2）。
+
 ## 里程碑之外的纪律
 
 - 每个 M 结束打 git tag（v0.1 ~ v0.6），README 的功能清单同步更新

@@ -56,7 +56,9 @@ src-tauri/src/
 │   ├── anthropic.rs        # 首发：Anthropic Messages API（SSE 流式 + tool use）
 │   └── types.rs            # Message / ToolCall / Usage 等领域类型
 ├── tools/
-│   ├── registry.rs         # trait Tool { name/schema/run } + 注册表
+│   ├── registry.rs         # trait Tool { name/schema/run } + 动态注册表
+│   │                       #   设计为多来源：v1 只有内置工具，
+│   │                       #   v2 接入 MCP client 和 skill 提供的工具，不改 loop
 │   ├── fs.rs               # read_file / write_file / edit_file / list_dir
 │   ├── search.rs           # glob + 内容搜索（用 ripgrep 的库 grep-searcher）
 │   └── bash.rs             # 命令执行（经 pty/ 模块）
@@ -122,7 +124,12 @@ react-markdown + Shiki（代码高亮）、xterm.js（终端渲染）。
 - 会话级"本次全部允许"开关；路径越界保护（工具只能访问选定项目目录内）。
 - API key 存 macOS Keychain，绝不落盘明文、绝不进前端。
 
-## 7. 暂不做（防止范围失控）
+## 7. v2 方向（v1 刻意不做，但已留好接缝）
 
-- 多 provider（先只做 Anthropic，但 trait 留好口子）
-- MCP 协议、子 agent、checkpoint/回滚、跨平台（Win/Linux）、自动更新
+| 能力 | 形态 | 预留的接缝 |
+|---|---|---|
+| 浏览器 | ① web_fetch/web_search 工具（agent 查文档）② 内嵌预览面板（看 localhost） | 工具走 registry，零改动 |
+| Skill | 按需加载的指令包（SKILL.md + 脚本），可对接 skillForge 技能库 | prompt.rs 的 system prompt 做成分段组装 |
+| MCP | MCP client（官方 rmcp SDK），接入整个 MCP 工具生态 | registry 多来源设计 |
+
+其余暂不做：多 provider（trait 已留口子）、子 agent、checkpoint/回滚、跨平台（Win/Linux）、自动更新。
