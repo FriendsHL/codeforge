@@ -28,8 +28,11 @@ export function ChatView() {
         )}
         {messages.map((message, index) => (
           <div key={index} className={`chat-bubble chat-bubble-${message.role}`}>
+            {message.reasoning && (
+              <div className="chat-reasoning">{message.reasoning}</div>
+            )}
             {message.role === "assistant" ? (
-              <ReactMarkdown>{message.content || "…"}</ReactMarkdown>
+              <ReactMarkdown>{message.content || (message.reasoning ? "" : "…")}</ReactMarkdown>
             ) : (
               message.content
             )}

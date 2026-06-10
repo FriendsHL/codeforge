@@ -87,6 +87,18 @@ body {
   margin-bottom: 0;
 }
 
+.chat-reasoning {
+  color: #999;
+  font-size: 12px;
+  line-height: 1.5;
+  border-left: 3px solid #eee;
+  padding-left: 10px;
+  margin-bottom: 8px;
+  white-space: pre-wrap;
+  max-height: 160px;
+  overflow-y: auto;
+}
+
 .chat-bubble-assistant pre {
   background: #f6f6f6;
   padding: 10px;

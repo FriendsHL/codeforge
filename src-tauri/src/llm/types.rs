@@ -10,6 +10,8 @@ pub struct ChatMessage {
 #[derive(Debug, Clone)]
 pub enum LlmEvent {
     TextDelta(String),
+    /// 推理模型的思考过程（doubao / mimo 等会先输出 reasoning_content）
+    ReasoningDelta(String),
     TurnEnd {
         stop_reason: Option<String>,
         output_tokens: Option<u64>,

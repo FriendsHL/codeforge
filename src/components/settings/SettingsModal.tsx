@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { App, Input, Modal, Select, Typography } from "antd";
 import { hasApiKey, setApiKey } from "../../lib/ipc";
-import { MODELS, useChatStore } from "../../stores/chatStore";
+import { MODEL_GROUPS, useChatStore } from "../../stores/chatStore";
 
 interface Props {
   open: boolean;
@@ -48,7 +48,21 @@ export function SettingsModal({ open, onClose }: Props) {
       confirmLoading={saving}
     >
       <Typography.Paragraph strong style={{ marginTop: 16 }}>
-        Anthropic API Key
+        模型
+      </Typography.Paragraph>
+      <Select
+        value={model}
+        onChange={setModel}
+        options={MODEL_GROUPS}
+        style={{ width: "100%" }}
+      />
+      <Typography.Paragraph type="secondary" style={{ fontSize: 12, marginTop: 4 }}>
+        火山方舟 / 小米的 API key 从启动终端的环境变量读取（ARK_API_KEY /
+        XIAOMI_MIMO_API_KEY），无需在此配置。
+      </Typography.Paragraph>
+
+      <Typography.Paragraph strong>
+        Anthropic API Key（仅选 Claude 模型时需要）
       </Typography.Paragraph>
       <Input.Password
         value={keyDraft}
@@ -58,14 +72,6 @@ export function SettingsModal({ open, onClose }: Props) {
       <Typography.Paragraph type="secondary" style={{ fontSize: 12, marginTop: 4 }}>
         密钥仅存储在 macOS Keychain，不会写入磁盘明文。
       </Typography.Paragraph>
-
-      <Typography.Paragraph strong>模型</Typography.Paragraph>
-      <Select
-        value={model}
-        onChange={setModel}
-        options={MODELS}
-        style={{ width: "100%" }}
-      />
     </Modal>
   );
 }

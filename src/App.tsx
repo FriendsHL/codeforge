@@ -11,12 +11,13 @@ function App() {
   const model = useChatStore((s) => s.model);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
-  // 首次启动没配 key 时直接引导到设置
+  // 选了 Claude 模型但没配 key 时引导到设置（ark/xiaomi 走环境变量，无需引导）
   useEffect(() => {
+    if (!model.startsWith("claude/")) return;
     void hasApiKey().then((configured) => {
       if (!configured) setSettingsOpen(true);
     });
-  }, []);
+  }, [model]);
 
   return (
     <ConfigProvider theme={{ token: { colorPrimary: "#d46b08" } }}>
