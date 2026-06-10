@@ -43,6 +43,8 @@ src-tauri/src/
 ├── commands/               # Tauri command（薄，只做参数转换+调度）
 │   ├── chat.rs             #   send_message / cancel / approve_permission
 │   ├── workspace.rs        #   open_project / list_sessions
+│   │                       #   read_dir_tree（文件树，懒加载子目录，遵循 .gitignore）
+│   │                       #   read_file_preview（文件内容预览）
 │   └── settings.rs         #   get/set 配置、API key
 ├── agent/
 │   ├── loop_.rs            # 核心循环：组装上下文 → 调 LLM → 解析工具调用
@@ -84,10 +86,12 @@ src/
 ├── stores/                 # zustand：chatStore / sessionStore / settingsStore
 ├── components/
 │   ├── chat/               # 消息流（流式 markdown）、输入框、工具调用卡片
+│   ├── explorer/           # 文件树面板（antd Tree 懒加载）+ 文件预览（只读、语法高亮）
 │   ├── diff/               # diff 审查视图（approve / reject）
 │   ├── terminal/           # xterm.js 内嵌终端（只读回显 agent 执行过程）
 │   └── settings/           # API key、模型选择、权限策略
-└── App.tsx                 # 布局：左侧会话列表 + 主区会话 + 可折叠终端
+└── App.tsx                 # 布局：左侧 会话列表+文件树 / 主区会话 / 可折叠终端
+                            # agent 正在读写的文件在树中高亮；改动后自动刷新（notify watcher）
 ```
 
 **选型**：antd（沿用 skillForge 经验）、zustand（轻量状态）、

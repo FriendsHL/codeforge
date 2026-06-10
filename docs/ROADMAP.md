@@ -23,9 +23,12 @@ M1 是最薄的端到端打通，后面每步在其上叠加。
 2. 只读工具：read_file / list_dir / glob / grep
 3. `agent/loop_.rs`：完整 tool-use 循环（LLM 返回 tool_use → 执行 → 回填 → 再调 LLM）
 4. 工作区：打开项目目录（文件夹选择器），工具限定在目录内
-5. UI：工具调用卡片（显示 agent 正在读哪个文件、搜什么）
+5. **文件树面板**：左侧目录树（懒加载、遵循 .gitignore），点击文件只读预览（语法高亮）；
+   agent 正在读的文件在树中高亮
+6. UI：工具调用卡片（显示 agent 正在读哪个文件、搜什么）
 
-**验收**：打开 skillForge 目录，问"这个项目的启动流程是怎样的？"，agent 自己翻代码后给出正确回答。
+**验收**：打开 skillForge 目录，左侧能浏览全部文件、点开任意文件看内容；
+问"这个项目的启动流程是怎样的？"，agent 自己翻代码后给出正确回答。
 
 ## M3 — 能改代码 目标：agent 写代码，用户审批 diff
 
@@ -35,6 +38,7 @@ M1 是最薄的端到端打通，后面每步在其上叠加。
 2. `security/policy.rs`：审批机制（PermissionAsk 事件 + oneshot 等待）
 3. diff 计算（similar crate）+ 前端 diff 审查视图（approve / reject）
 4. 会话级"全部允许"开关
+5. 文件 watcher（notify crate）：agent 改动文件后，文件树和打开的预览自动刷新
 
 **验收**：让 agent "给 README 加一节使用说明"，弹出 diff，点确认后文件真的改了。
 
