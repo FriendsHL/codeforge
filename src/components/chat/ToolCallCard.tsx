@@ -19,6 +19,7 @@ const TOOL_LABELS: Record<string, string> = {
   bash: "执行命令",
   web_fetch: "抓网页",
   web_search: "搜索",
+  load_skill: "加载技能",
 };
 
 function summarizeInput(name: string, input: unknown): string {
@@ -41,6 +42,8 @@ function summarizeInput(name: string, input: unknown): string {
       return String(obj.url ?? "");
     case "web_search":
       return String(obj.query ?? "");
+    case "load_skill":
+      return String(obj.name ?? "");
     case "git_status":
       return "";
     case "git_diff":

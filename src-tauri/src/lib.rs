@@ -6,6 +6,7 @@ mod llm;
 mod pty;
 mod security;
 mod session;
+mod skills;
 mod tools;
 
 use std::path::PathBuf;

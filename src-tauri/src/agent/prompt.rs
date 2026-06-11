@@ -25,6 +25,11 @@ pub fn build_system_prompt(workspace: Option<&Path>) -> String {
 - 遇到不熟悉的库 API、报错信息或需要最新文档时，用 web_search 搜索、web_fetch 阅读具体页面；优先官方文档。"
                 .into(),
         );
+
+        // M8 技能段：当年在 M2 留的「分段组装」接缝，今天用上了
+        if let Some(skills_section) = crate::skills::prompt_section(Some(workspace)) {
+            sections.push(skills_section);
+        }
     }
 
     sections.join("\n\n")

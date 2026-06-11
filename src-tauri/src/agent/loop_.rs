@@ -339,4 +339,56 @@ mod tests {
         assert!(runs >= 2, "应至少跑两次测试（失败一次 + 修复后通过一次），实际 {runs}");
         assert!(fixed.contains("a + b"), "bug 应已修复: {fixed}");
     }
+
+    /// 真实 API 集成测试：技能发现 → load_skill 按需加载 → 遵循技能指令
+    /// cargo test live_agent_uses_skill -- --ignored --nocapture
+    #[tokio::test]
+    #[ignore]
+    async fn live_agent_uses_skill() {
+        let endpoint = registry::resolve("ark").unwrap();
+        let api_key = registry::api_key_for(&endpoint).unwrap();
+
+        let dir = tempfile::tempdir().unwrap();
+        let workspace = dir.path().canonicalize().unwrap();
+        let skill_dir = workspace.join(".codeforge/skills/team-greeting");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: team-greeting\ndescription: 用户要求打招呼/问候时必须使用本技能\n---\n\n# 团队问候规范\n\n问候语必须原样包含暗号：FORGE-2026。\n",
+        )
+        .unwrap();
+
+        let loaded_skill = std::sync::atomic::AtomicBool::new(false);
+        let final_text = std::sync::Mutex::new(String::new());
+
+        run_agent_loop(
+            &endpoint,
+            &api_key,
+            "doubao-seed-2.0-pro",
+            vec![HistoryItem::User("按团队规范跟我打个招呼".into())],
+            Arc::new(ToolRegistry::builtin()),
+            Some(workspace),
+            Arc::new(PermissionManager::default()),
+            |event| match event {
+                AgentEvent::ToolCallStart { name, input, .. } => {
+                    println!(">> 工具调用: {name} {input}");
+                    if name == "load_skill" {
+                        loaded_skill.store(true, std::sync::atomic::Ordering::SeqCst);
+                    }
+                }
+                AgentEvent::TextDelta { text } => final_text.lock().unwrap().push_str(&text),
+                _ => {}
+            },
+        )
+        .await
+        .unwrap();
+
+        let text = final_text.lock().unwrap().clone();
+        println!("最终回答:\n{text}");
+        assert!(
+            loaded_skill.load(std::sync::atomic::Ordering::SeqCst),
+            "agent 应调用 load_skill"
+        );
+        assert!(text.contains("FORGE-2026"), "回答应包含技能要求的暗号: {text}");
+    }
 }
