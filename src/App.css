@@ -86,18 +86,14 @@ body {
   vertical-align: middle;
 }
 
-.changes-panel {
-  max-height: 38%;
-  overflow-y: auto;
-  border-top: 1px solid #f0f0f0;
-  padding: 6px 8px;
+.explorer-switch {
+  padding: 4px 6px 8px;
 }
 
-.changes-header {
-  font-size: 12px;
-  font-weight: 600;
-  color: #666;
-  padding: 4px 0;
+.changes-panel {
+  flex: 1;
+  overflow-y: auto;
+  padding: 2px 8px;
 }
 
 .changes-item {

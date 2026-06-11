@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { App, Modal, Tree, Typography } from "antd";
+import { App, Badge, Empty, Modal, Segmented, Tree, Typography } from "antd";
 import type { TreeDataNode } from "antd";
 import { gitFileDiff, readDirTree, readFilePreview } from "../../lib/ipc";
 import { useGitStore } from "../../stores/gitStore";
@@ -71,6 +71,7 @@ export function Explorer() {
   const { message } = App.useApp();
   const { version } = useWorkspaceStore();
   const changes = useGitStore((s) => s.changes);
+  const [view, setView] = useState<"files" | "changes">("files");
   const [treeData, setTreeData] = useState<TreeDataNode[]>([]);
   const [preview, setPreview] = useState<{ path: string; content: string; truncated: boolean } | null>(null);
   const [diff, setDiff] = useState<{ path: string; text: string } | null>(null);
@@ -138,32 +139,64 @@ export function Explorer() {
 
   return (
     <div className="explorer">
-      <div className="explorer-tree">
-        <Tree.DirectoryTree
-          treeData={treeData}
-          loadData={loadChildren}
-          titleRender={(node) => {
-            const key = String(node.key);
-            return (
-              <span>
-                {String(node.title)}
-                {node.isLeaf ? (
-                  <StatusBadge status={fileStatus.get(key)} />
-                ) : dirtyDirs.has(key) ? (
-                  <span className="git-dot" />
-                ) : null}
-              </span>
-            );
-          }}
-          onSelect={(_, info) => {
-            if (info.node.isLeaf) void openFile(String(info.node.key));
-          }}
+      <div className="explorer-switch">
+        <Segmented
+          block
+          size="small"
+          value={view}
+          onChange={(v) => setView(v as "files" | "changes")}
+          options={[
+            { label: "文件", value: "files" },
+            {
+              label: (
+                <span>
+                  改动
+                  <Badge
+                    count={changes.length}
+                    size="small"
+                    color="#d46b08"
+                    style={{ marginLeft: 4 }}
+                  />
+                </span>
+              ),
+              value: "changes",
+            },
+          ]}
         />
       </div>
 
-      {changes.length > 0 && (
+      {view === "files" ? (
+        <div className="explorer-tree">
+          <Tree.DirectoryTree
+            treeData={treeData}
+            loadData={loadChildren}
+            titleRender={(node) => {
+              const key = String(node.key);
+              return (
+                <span>
+                  {String(node.title)}
+                  {node.isLeaf ? (
+                    <StatusBadge status={fileStatus.get(key)} />
+                  ) : dirtyDirs.has(key) ? (
+                    <span className="git-dot" />
+                  ) : null}
+                </span>
+              );
+            }}
+            onSelect={(_, info) => {
+              if (info.node.isLeaf) void openFile(String(info.node.key));
+            }}
+          />
+        </div>
+      ) : (
         <div className="changes-panel">
-          <div className="changes-header">改动文件（{changes.length}）</div>
+          {changes.length === 0 && (
+            <Empty
+              image={Empty.PRESENTED_IMAGE_SIMPLE}
+              description="工作区干净，无改动"
+              style={{ marginTop: 32 }}
+            />
+          )}
           {changes.map((c) => (
             <div
               key={c.path}
