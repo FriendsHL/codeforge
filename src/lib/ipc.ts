@@ -10,7 +10,8 @@ export type AgentEvent =
   | { type: "reasoningDelta"; text: string }
   | { type: "toolCallStart"; id: string; name: string; input: unknown }
   | { type: "toolCallEnd"; id: string; output: string; isError: boolean }
-  | { type: "permissionAsk"; requestId: string; toolName: string; path: string; diff: string }
+  | { type: "permissionAsk"; requestId: string; toolName: string; summary: string; diff: string }
+  | { type: "commandOutput"; id: string; chunk: string }
   | { type: "turnEnd"; stopReason: string | null; outputTokens: number | null }
   | { type: "error"; message: string };
 

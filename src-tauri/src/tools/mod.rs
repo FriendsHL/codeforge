@@ -1,3 +1,4 @@
+pub mod bash;
 pub mod fs;
 pub mod git;
 pub mod registry;

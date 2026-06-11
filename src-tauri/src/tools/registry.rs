@@ -7,19 +7,29 @@ use serde_json::Value;
 
 use crate::llm::types::ToolSpec;
 
-/// 写类工具的改动预演：loop 据此向用户发起审批
+/// 副作用操作的预演：loop 据此向用户发起审批
+/// 写文件：summary=路径、diff=改动；执行命令：summary=命令、diff 为空
 #[derive(Debug, Clone)]
-pub struct WritePlan {
-    pub path: String,
+pub struct ApprovalPlan {
+    pub summary: String,
     pub diff: String,
 }
 
 pub trait Tool: Send + Sync {
     fn spec(&self) -> ToolSpec;
     fn run(&self, workspace: &Path, input: &Value) -> Result<String, String>;
-    /// 返回 Some(plan) 的工具属于写操作，执行前必须经用户审批；只读工具保持默认 None
-    fn plan(&self, _workspace: &Path, _input: &Value) -> Result<Option<WritePlan>, String> {
+    /// 返回 Some(plan) 的工具有副作用，执行前必须经用户审批；只读工具保持默认 None
+    fn plan(&self, _workspace: &Path, _input: &Value) -> Result<Option<ApprovalPlan>, String> {
         Ok(None)
+    }
+    /// 长耗时工具（如 bash）可边执行边经 on_chunk 输出；默认退化为一次性 run()
+    fn run_streaming(
+        &self,
+        workspace: &Path,
+        input: &Value,
+        _on_chunk: &mut dyn FnMut(&str),
+    ) -> Result<String, String> {
+        self.run(workspace, input)
     }
 }
 
@@ -41,6 +51,7 @@ impl ToolRegistry {
                 Arc::new(super::git::GitLogTool),
                 Arc::new(super::write::WriteFileTool),
                 Arc::new(super::write::EditFileTool),
+                Arc::new(super::bash::BashTool),
             ],
         }
     }

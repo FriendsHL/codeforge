@@ -148,19 +148,27 @@ async fn execute_tool(
             on_event(AgentEvent::PermissionAsk {
                 request_id: call_id.to_string(),
                 tool_name: name.to_string(),
-                path: plan.path,
+                summary: plan.summary,
                 diff: plan.diff,
             });
             if !permissions.wait(call_id, rx).await {
-                return Err("用户拒绝了本次改动。请询问用户的意图后再调整方案，不要原样重试。".into());
+                return Err("用户拒绝了本次操作。请询问用户的意图后再调整方案，不要原样重试。".into());
             }
         }
     }
 
-    // 文件 IO 放到阻塞线程池，避免卡住异步运行时
-    tokio::task::spawn_blocking(move || tool.run(&workspace, &input))
-        .await
-        .map_err(|e| format!("工具执行崩溃: {e}"))?
+    // 工具在阻塞线程池执行；流式输出经通道转回异步侧推给前端
+    let (chunk_tx, mut chunk_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let handle = tokio::task::spawn_blocking(move || {
+        let mut on_chunk = |chunk: &str| {
+            let _ = chunk_tx.send(chunk.to_string());
+        };
+        tool.run_streaming(&workspace, &input, &mut on_chunk)
+    });
+    while let Some(chunk) = chunk_rx.recv().await {
+        on_event(AgentEvent::CommandOutput { id: call_id.to_string(), chunk });
+    }
+    handle.await.map_err(|e| format!("工具执行崩溃: {e}"))?
 }
 
 fn preview(content: &str) -> String {
@@ -255,8 +263,8 @@ mod tests {
             Some(workspace.clone()),
             permissions,
             |event| match event {
-                AgentEvent::PermissionAsk { request_id, path, diff, .. } => {
-                    println!(">> 审批请求: {path}\n{diff}");
+                AgentEvent::PermissionAsk { request_id, summary, diff, .. } => {
+                    println!(">> 审批请求: {summary}\n{diff}");
                     asked.store(true, std::sync::atomic::Ordering::SeqCst);
                     assert!(diff.contains("-hello codeforge"));
                     assert!(diff.contains("+goodbye codeforge"));
@@ -275,5 +283,60 @@ mod tests {
         let content = std::fs::read_to_string(workspace.join("notes.txt")).unwrap();
         assert_eq!(content, "goodbye codeforge\n", "审批通过后文件应已修改");
         println!("文件最终内容: {content}");
+    }
+
+    /// 真实 API 集成测试：自我纠错闭环（跑测试 → 失败 → 修代码 → 重跑直到通过）
+    /// cargo test live_agent_self_corrects -- --ignored --nocapture
+    #[tokio::test]
+    #[ignore]
+    async fn live_agent_self_corrects_with_bash() {
+        let endpoint = registry::resolve("ark").unwrap();
+        let api_key = registry::api_key_for(&endpoint).unwrap();
+
+        let dir = tempfile::tempdir().unwrap();
+        let workspace = dir.path().canonicalize().unwrap();
+        std::fs::write(workspace.join("calc.py"), "def add(a, b):\n    return a - b\n").unwrap();
+        std::fs::write(
+            workspace.join("test_calc.py"),
+            "from calc import add\nassert add(1, 2) == 3, f'add(1,2) should be 3, got {add(1,2)}'\nprint('ALL TESTS PASSED')\n",
+        )
+        .unwrap();
+
+        let permissions = Arc::new(PermissionManager::default());
+        let pm = permissions.clone();
+        let bash_runs = std::sync::atomic::AtomicUsize::new(0);
+
+        run_agent_loop(
+            &endpoint,
+            &api_key,
+            "doubao-seed-2.0-pro",
+            vec![HistoryItem::User(
+                "运行 python3 test_calc.py。如果测试失败，修复 calc.py 里的 bug，然后重跑测试直到通过。".into(),
+            )],
+            Arc::new(ToolRegistry::builtin()),
+            Some(workspace.clone()),
+            permissions,
+            |event| match event {
+                AgentEvent::PermissionAsk { request_id, summary, .. } => {
+                    println!(">> 审批(自动放行): {summary}");
+                    pm.resolve(&request_id, true, true).unwrap(); // 模拟"本会话全部允许"
+                }
+                AgentEvent::ToolCallStart { name, input, .. } => {
+                    if name == "bash" {
+                        bash_runs.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    }
+                    println!(">> 工具调用: {name} {input}");
+                }
+                _ => {}
+            },
+        )
+        .await
+        .unwrap();
+
+        let runs = bash_runs.load(std::sync::atomic::Ordering::SeqCst);
+        let fixed = std::fs::read_to_string(workspace.join("calc.py")).unwrap();
+        println!("bash 调用 {runs} 次，calc.py 最终内容:\n{fixed}");
+        assert!(runs >= 2, "应至少跑两次测试（失败一次 + 修复后通过一次），实际 {runs}");
+        assert!(fixed.contains("a + b"), "bug 应已修复: {fixed}");
     }
 }

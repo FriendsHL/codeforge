@@ -3,6 +3,7 @@ mod commands;
 mod config;
 mod git;
 mod llm;
+mod pty;
 mod security;
 mod tools;
 

@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use serde_json::{json, Value};
 use similar::TextDiff;
 
-use super::registry::{Tool, WritePlan};
+use super::registry::{Tool, ApprovalPlan};
 use crate::llm::types::ToolSpec;
 
 /// 写路径校验：不能用 canonicalize（新文件还不存在），改为校验父目录 + 路径成分
@@ -58,9 +58,9 @@ impl Tool for WriteFileTool {
         }
     }
 
-    fn plan(&self, workspace: &Path, input: &Value) -> Result<Option<WritePlan>, String> {
+    fn plan(&self, workspace: &Path, input: &Value) -> Result<Option<ApprovalPlan>, String> {
         let (_, rel, old, new) = write_file_parts(workspace, input)?;
-        Ok(Some(WritePlan { diff: unified_diff(&rel, &old, &new), path: rel }))
+        Ok(Some(ApprovalPlan { diff: unified_diff(&rel, &old, &new), summary: rel }))
     }
 
     fn run(&self, workspace: &Path, input: &Value) -> Result<String, String> {
@@ -131,9 +131,9 @@ impl Tool for EditFileTool {
         }
     }
 
-    fn plan(&self, workspace: &Path, input: &Value) -> Result<Option<WritePlan>, String> {
+    fn plan(&self, workspace: &Path, input: &Value) -> Result<Option<ApprovalPlan>, String> {
         let (_, rel, old, new) = edit_file_parts(workspace, input)?;
-        Ok(Some(WritePlan { diff: unified_diff(&rel, &old, &new), path: rel }))
+        Ok(Some(ApprovalPlan { diff: unified_diff(&rel, &old, &new), summary: rel }))
     }
 
     fn run(&self, workspace: &Path, input: &Value) -> Result<String, String> {
@@ -154,7 +154,7 @@ mod tests {
             .plan(dir.path(), &json!({"path": "a.txt", "content": "hello\n"}))
             .unwrap()
             .unwrap();
-        assert_eq!(plan.path, "a.txt");
+        assert_eq!(plan.summary, "a.txt");
         assert!(plan.diff.contains("+hello"));
     }
 

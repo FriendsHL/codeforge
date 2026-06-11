@@ -6,9 +6,10 @@ import { useChatStore } from "../../stores/chatStore";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
 import { ApprovalCard } from "./ApprovalCard";
 import { ToolCallCard } from "./ToolCallCard";
+import { TerminalPanel } from "../terminal/TerminalPanel";
 
 export function ChatView() {
-  const { items, streaming, error, send, clear } = useChatStore();
+  const { items, streaming, error, send, clear, terminalOpen } = useChatStore();
   const workspaceName = useWorkspaceStore((s) => s.name);
   const [draft, setDraft] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -50,6 +51,8 @@ export function ChatView() {
         )}
         {error && <Alert type="error" message={error} showIcon />}
       </div>
+
+      {terminalOpen && <TerminalPanel />}
 
       <div className="chat-input">
         <Input.TextArea

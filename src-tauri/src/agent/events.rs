@@ -17,14 +17,18 @@ pub enum AgentEvent {
         output: String,
         is_error: bool,
     },
-    /// 写操作审批请求：前端弹 diff，用户经 approve_permission 决议
+    /// 副作用操作审批请求：前端弹 diff/命令，用户经 approve_permission 决议
     #[serde(rename_all = "camelCase")]
     PermissionAsk {
         request_id: String,
         tool_name: String,
-        path: String,
+        /// 写文件 = 路径；执行命令 = 命令本身
+        summary: String,
         diff: String,
     },
+    /// bash 命令的实时输出片段（流向前端终端面板）
+    #[serde(rename_all = "camelCase")]
+    CommandOutput { id: String, chunk: String },
     #[serde(rename_all = "camelCase")]
     TurnEnd {
         stop_reason: Option<String>,

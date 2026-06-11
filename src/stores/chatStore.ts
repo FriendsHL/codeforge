@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { ChatMessage, sendMessage } from "../lib/ipc";
+import { termWrite } from "../lib/terminal";
 import { useGitStore } from "./gitStore";
 
 // value 格式: "<provider>/<model>"，provider 对应 Rust 端 llm/registry.rs
@@ -56,7 +57,7 @@ export type ChatItem =
       kind: "approval";
       requestId: string;
       toolName: string;
-      path: string;
+      summary: string;
       diff: string;
       decision?: "approved" | "denied" | "allowAll";
     };
@@ -66,6 +67,7 @@ interface ChatState {
   streaming: boolean;
   error: string | null;
   model: string;
+  terminalOpen: boolean;
   setModel: (model: string) => void;
   send: (text: string) => Promise<void>;
   clear: () => void;
@@ -76,6 +78,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   streaming: false,
   error: null,
   model: localStorage.getItem(MODEL_STORAGE_KEY) ?? DEFAULT_MODEL,
+  terminalOpen: false,
 
   setModel: (model) => {
     localStorage.setItem(MODEL_STORAGE_KEY, model);
@@ -147,6 +150,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
               });
               return items;
             });
+            if (event.name === "bash") {
+              const cmd = (event.input as { command?: string })?.command ?? "";
+              termWrite(`\r\n\x1b[1;33m$ ${cmd}\x1b[0m\r\n`);
+              set({ terminalOpen: true });
+            }
+            break;
+          case "commandOutput":
+            termWrite(event.chunk);
             break;
           case "toolCallEnd":
             update((items) =>
@@ -163,7 +174,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 kind: "approval",
                 requestId: event.requestId,
                 toolName: event.toolName,
-                path: event.path,
+                summary: event.summary,
                 diff: event.diff,
               });
               return items;

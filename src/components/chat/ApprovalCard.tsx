@@ -3,6 +3,7 @@ import { App, Button, Space, Tag } from "antd";
 import {
   CheckOutlined,
   CloseOutlined,
+  CodeOutlined,
   EditOutlined,
   ThunderboltOutlined,
 } from "@ant-design/icons";
@@ -14,6 +15,7 @@ import { DiffView } from "../explorer/DiffView";
 export function ApprovalCard({ item }: { item: Extract<ChatItem, { kind: "approval" }> }) {
   const { message } = App.useApp();
   const [submitting, setSubmitting] = useState(false);
+  const isBash = item.toolName === "bash";
 
   const decide = async (approved: boolean, allowAll: boolean) => {
     setSubmitting(true);
@@ -35,16 +37,22 @@ export function ApprovalCard({ item }: { item: Extract<ChatItem, { kind: "approv
   return (
     <div className="approval-card">
       <div className="approval-header">
-        <EditOutlined />
+        {isBash ? <CodeOutlined /> : <EditOutlined />}
         <span>
-          agent 请求{item.toolName === "write_file" ? "写入" : "修改"}
+          {isBash
+            ? "agent 请求执行命令"
+            : `agent 请求${item.toolName === "write_file" ? "写入" : "修改"}`}
         </span>
-        <Tag color="orange">{item.path}</Tag>
+        {!isBash && <Tag color="orange">{item.summary}</Tag>}
         {item.decision === "approved" && <Tag color="green">已允许</Tag>}
         {item.decision === "allowAll" && <Tag color="green">已允许（本会话全部）</Tag>}
         {item.decision === "denied" && <Tag color="red">已拒绝</Tag>}
       </div>
-      <DiffView path={item.path} diff={item.diff} />
+      {isBash ? (
+        <pre className="approval-command">$ {item.summary}</pre>
+      ) : (
+        <DiffView path={item.summary} diff={item.diff} />
+      )}
       {!item.decision && (
         <Space className="approval-actions">
           <Button

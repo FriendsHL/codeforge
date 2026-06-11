@@ -11,6 +11,12 @@ const TOOL_LABELS: Record<string, string> = {
   list_dir: "列目录",
   glob: "找文件",
   grep: "搜内容",
+  git_status: "git 状态",
+  git_diff: "git diff",
+  git_log: "git 历史",
+  write_file: "写文件",
+  edit_file: "改文件",
+  bash: "执行命令",
 };
 
 function summarizeInput(name: string, input: unknown): string {
@@ -18,6 +24,8 @@ function summarizeInput(name: string, input: unknown): string {
   const obj = input as Record<string, unknown>;
   switch (name) {
     case "read_file":
+    case "write_file":
+    case "edit_file":
       return String(obj.path ?? "");
     case "list_dir":
       return String(obj.path ?? ".");
@@ -25,6 +33,13 @@ function summarizeInput(name: string, input: unknown): string {
       return String(obj.pattern ?? "");
     case "grep":
       return [obj.pattern, obj.include, obj.path].filter(Boolean).join("  ");
+    case "bash":
+      return String(obj.command ?? "");
+    case "git_status":
+      return "";
+    case "git_diff":
+    case "git_log":
+      return String(obj.path ?? "");
     default:
       return JSON.stringify(obj);
   }
