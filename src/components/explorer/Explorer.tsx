@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { App, Badge, Empty, Modal, Segmented, Tree, Typography } from "antd";
+import { App, Empty, Modal, Tree, Typography } from "antd";
 import type { TreeDataNode } from "antd";
 import { gitFileDiff, readDirTree, readFilePreview } from "../../lib/ipc";
 import { highlightCode, languageForPath } from "../../lib/highlight";
@@ -47,11 +47,10 @@ function attachChildren(
   });
 }
 
-export function Explorer() {
+export function Explorer({ view }: { view: "files" | "changes" }) {
   const { message } = App.useApp();
   const { version } = useWorkspaceStore();
   const changes = useGitStore((s) => s.changes);
-  const [view, setView] = useState<"files" | "changes">("files");
   const [treeData, setTreeData] = useState<TreeDataNode[]>([]);
   const [preview, setPreview] = useState<{ path: string; content: string; truncated: boolean } | null>(null);
   const [diff, setDiff] = useState<{ path: string; text: string } | null>(null);
@@ -119,32 +118,6 @@ export function Explorer() {
 
   return (
     <div className="explorer">
-      <div className="explorer-switch">
-        <Segmented
-          block
-          size="small"
-          value={view}
-          onChange={(v) => setView(v as "files" | "changes")}
-          options={[
-            { label: "文件", value: "files" },
-            {
-              label: (
-                <span>
-                  改动
-                  <Badge
-                    count={changes.length}
-                    size="small"
-                    color="#d46b08"
-                    style={{ marginLeft: 4 }}
-                  />
-                </span>
-              ),
-              value: "changes",
-            },
-          ]}
-        />
-      </div>
-
       {view === "files" ? (
         <div className="explorer-tree">
           <Tree.DirectoryTree

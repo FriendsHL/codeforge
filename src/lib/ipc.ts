@@ -71,3 +71,25 @@ export const gitFileDiff = (path: string) => invoke<string>("git_file_diff", { p
 
 export const approvePermission = (requestId: string, approved: boolean, allowAll: boolean) =>
   invoke<void>("approve_permission", { requestId, approved, allowAll });
+
+export interface SessionMeta {
+  id: number;
+  title: string;
+  updatedAt: string;
+}
+
+export const listSessions = () => invoke<SessionMeta[]>("list_sessions");
+
+export const createSession = (title: string) =>
+  invoke<SessionMeta>("create_session", { title });
+
+export const renameSession = (id: number, title: string) =>
+  invoke<void>("rename_session", { id, title });
+
+export const deleteSession = (id: number) => invoke<void>("delete_session", { id });
+
+export const loadSessionItems = (id: number) =>
+  invoke<string>("load_session_items", { id });
+
+export const saveSessionItems = (id: number, items: string) =>
+  invoke<void>("save_session_items", { id, items });

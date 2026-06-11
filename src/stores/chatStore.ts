@@ -1,7 +1,8 @@
 import { create } from "zustand";
-import { ChatMessage, sendMessage } from "../lib/ipc";
+import { ChatMessage, createSession, saveSessionItems, sendMessage } from "../lib/ipc";
 import { termWrite } from "../lib/terminal";
 import { useGitStore } from "./gitStore";
+import { useSessionStore } from "./sessionStore";
 
 // value 格式: "<provider>/<model>"，provider 对应 Rust 端 llm/registry.rs
 export const MODEL_GROUPS = [
@@ -68,6 +69,9 @@ interface ChatState {
   error: string | null;
   model: string;
   terminalOpen: boolean;
+  currentSessionId: number | null;
+  /** 本会话累计输出 tokens（仅 UI 提示用） */
+  sessionTokens: number;
   setModel: (model: string) => void;
   send: (text: string) => Promise<void>;
   clear: () => void;
@@ -79,6 +83,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
   error: null,
   model: localStorage.getItem(MODEL_STORAGE_KEY) ?? DEFAULT_MODEL,
   terminalOpen: false,
+  currentSessionId: null,
+  sessionTokens: 0,
 
   setModel: (model) => {
     localStorage.setItem(MODEL_STORAGE_KEY, model);
@@ -88,6 +94,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
   send: async (text) => {
     const { items, model, streaming } = get();
     if (streaming || !text.trim()) return;
+
+    // 首条消息时落库建会话（标题取消息前 24 字）
+    if (get().currentSessionId === null) {
+      try {
+        const meta = await createSession(text.trim().slice(0, 24));
+        set({ currentSessionId: meta.id });
+        void useSessionStore.getState().refresh();
+      } catch (e) {
+        set({ error: `创建会话失败: ${e}` });
+        return;
+      }
+    }
 
     // 跨轮次历史只保留纯文本消息（工具轮次每次由 Rust 端 loop 内部重建）
     const history: ChatMessage[] = [
@@ -180,6 +198,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
               return items;
             });
             break;
+          case "turnEnd":
+            if (event.outputTokens) {
+              set((s) => ({ sessionTokens: s.sessionTokens + (event.outputTokens ?? 0) }));
+            }
+            break;
           case "error":
             set({ error: event.message });
             break;
@@ -198,8 +221,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
       });
       // 每轮结束刷新 git 状态（用户可能在外部改了文件；M3 写能力上线后 agent 也会改）
       void useGitStore.getState().refresh();
+      // 持久化本轮完整对话
+      const { currentSessionId, items: finalItems } = get();
+      if (currentSessionId !== null) {
+        try {
+          await saveSessionItems(currentSessionId, JSON.stringify(finalItems));
+          void useSessionStore.getState().refresh();
+        } catch {
+          // 持久化失败不打断对话
+        }
+      }
     }
   },
 
-  clear: () => set({ items: [], error: null }),
+  clear: () => useSessionStore.getState().startNew(),
 }));

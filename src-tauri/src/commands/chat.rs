@@ -21,14 +21,16 @@ pub async fn send_message(
     let tool_registry = state.tools.clone();
     let permissions = state.permissions.clone();
 
-    let history: Vec<HistoryItem> = messages
-        .into_iter()
-        .filter(|m| !m.content.is_empty())
-        .map(|m| match m.role.as_str() {
-            "assistant" => HistoryItem::Assistant { text: m.content, tool_calls: vec![] },
-            _ => HistoryItem::User(m.content),
-        })
-        .collect();
+    let history: Vec<HistoryItem> = truncate_history(
+        messages
+            .into_iter()
+            .filter(|m| !m.content.is_empty())
+            .map(|m| match m.role.as_str() {
+                "assistant" => HistoryItem::Assistant { text: m.content, tool_calls: vec![] },
+                _ => HistoryItem::User(m.content),
+            })
+            .collect(),
+    );
 
     let on_event = |event: AgentEvent| {
         let _ = channel.send(event);
@@ -50,6 +52,22 @@ pub async fn send_message(
         on_event(AgentEvent::Error { message: message.clone() });
     }
     result
+}
+
+/// 超长对话截断：从最旧的消息开始丢，至少保留最后一条。
+/// 粗略按字符数对齐上下文窗口（中文 1 字符 ≈ 1 token+，150K 字符对 256K 窗口留足余量）。
+fn truncate_history(mut history: Vec<HistoryItem>) -> Vec<HistoryItem> {
+    const MAX_CHARS: usize = 150_000;
+    let size = |item: &HistoryItem| match item {
+        HistoryItem::User(t) => t.chars().count(),
+        HistoryItem::Assistant { text, .. } => text.chars().count(),
+        HistoryItem::ToolResult { content, .. } => content.chars().count(),
+    };
+    let mut total: usize = history.iter().map(size).sum();
+    while history.len() > 1 && total > MAX_CHARS {
+        total -= size(&history.remove(0));
+    }
+    history
 }
 
 /// 前端对 PermissionAsk 的决议

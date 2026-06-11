@@ -9,7 +9,7 @@ import { ToolCallCard } from "./ToolCallCard";
 import { TerminalPanel } from "../terminal/TerminalPanel";
 
 export function ChatView() {
-  const { items, streaming, error, send, clear, terminalOpen } = useChatStore();
+  const { items, streaming, error, send, clear, terminalOpen, sessionTokens } = useChatStore();
   const workspaceName = useWorkspaceStore((s) => s.name);
   const [draft, setDraft] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -53,6 +53,10 @@ export function ChatView() {
       </div>
 
       {terminalOpen && <TerminalPanel />}
+
+      {sessionTokens > 0 && (
+        <div className="chat-status">本会话累计输出 {sessionTokens.toLocaleString()} tokens</div>
+      )}
 
       <div className="chat-input">
         <Input.TextArea

@@ -3,19 +3,25 @@ import { listen } from "@tauri-apps/api/event";
 import { App as AntdApp, Button, ConfigProvider, Tag, Tooltip } from "antd";
 import { BranchesOutlined, FolderOpenOutlined, SettingOutlined } from "@ant-design/icons";
 import { ChatView } from "./components/chat/ChatView";
-import { Explorer } from "./components/explorer/Explorer";
+import { Sidebar } from "./components/sidebar/Sidebar";
 import { SettingsModal } from "./components/settings/SettingsModal";
 import { hasApiKey } from "./lib/ipc";
 import { useChatStore } from "./stores/chatStore";
 import { useGitStore } from "./stores/gitStore";
+import { useSessionStore } from "./stores/sessionStore";
 import { useWorkspaceStore } from "./stores/workspaceStore";
 import "./App.css";
 
 function App() {
   const model = useChatStore((s) => s.model);
-  const { root, name, openWorkspace } = useWorkspaceStore();
+  const { name, openWorkspace } = useWorkspaceStore();
   const branch = useGitStore((s) => s.branch);
   const [settingsOpen, setSettingsOpen] = useState(false);
+
+  // 启动时加载历史会话列表
+  useEffect(() => {
+    void useSessionStore.getState().refresh();
+  }, []);
 
   // 选了 Claude 模型但没配 key 时引导到设置（ark/xiaomi 走环境变量，无需引导）
   useEffect(() => {
@@ -64,11 +70,7 @@ function App() {
             </Tooltip>
           </header>
           <div className="app-body">
-            {root && (
-              <aside className="app-sider">
-                <Explorer />
-              </aside>
-            )}
+            <Sidebar />
             <ChatView />
           </div>
           <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
