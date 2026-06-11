@@ -1,6 +1,7 @@
 mod agent;
 mod commands;
 mod config;
+mod git;
 mod llm;
 mod tools;
 
@@ -30,6 +31,8 @@ pub fn run() {
             commands::workspace::set_workspace,
             commands::workspace::read_dir_tree,
             commands::workspace::read_file_preview,
+            commands::git::git_overview,
+            commands::git::git_file_diff,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

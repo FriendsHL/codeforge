@@ -52,3 +52,17 @@ export const readDirTree = (path: string) =>
 
 export const readFilePreview = (path: string) =>
   invoke<FilePreview>("read_file_preview", { path });
+
+export interface GitChange {
+  path: string;
+  status: string;
+}
+
+export interface GitOverview {
+  branch: string;
+  changes: GitChange[];
+}
+
+export const gitOverview = () => invoke<GitOverview | null>("git_overview");
+
+export const gitFileDiff = (path: string) => invoke<string>("git_file_diff", { path });

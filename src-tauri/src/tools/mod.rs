@@ -1,4 +1,5 @@
 pub mod fs;
+pub mod git;
 pub mod registry;
 pub mod search;
 

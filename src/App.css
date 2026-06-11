@@ -54,8 +54,91 @@ body {
   padding: 8px 4px;
 }
 
+.explorer {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.explorer-tree {
+  flex: 1;
+  overflow-y: auto;
+}
+
 .explorer .ant-tree {
   font-size: 13px;
+}
+
+.git-badge {
+  margin-left: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  font-family: "SF Mono", Menlo, monospace;
+}
+
+.git-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #d46b08;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+.changes-panel {
+  max-height: 38%;
+  overflow-y: auto;
+  border-top: 1px solid #f0f0f0;
+  padding: 6px 8px;
+}
+
+.changes-header {
+  font-size: 12px;
+  font-weight: 600;
+  color: #666;
+  padding: 4px 0;
+}
+
+.changes-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 4px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12.5px;
+}
+
+.changes-item:hover {
+  background: #fafafa;
+}
+
+.changes-item .git-badge {
+  margin-left: 0;
+}
+
+.changes-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
+
+.diff-add {
+  background: #f0fff0;
+  color: #237804;
+}
+
+.diff-del {
+  background: #fff1f0;
+  color: #a8071a;
+}
+
+.diff-hunk {
+  color: #1677ff;
+  background: #f0f5ff;
 }
 
 .file-preview {

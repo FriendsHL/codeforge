@@ -25,6 +25,9 @@ impl ToolRegistry {
                 Arc::new(super::fs::ListDirTool),
                 Arc::new(super::search::GlobTool),
                 Arc::new(super::search::GrepTool),
+                Arc::new(super::git::GitStatusTool),
+                Arc::new(super::git::GitDiffTool),
+                Arc::new(super::git::GitLogTool),
             ],
         }
     }

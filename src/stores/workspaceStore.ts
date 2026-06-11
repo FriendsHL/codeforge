@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { open } from "@tauri-apps/plugin-dialog";
 import { setWorkspace } from "../lib/ipc";
+import { useGitStore } from "./gitStore";
 
 interface WorkspaceState {
   root: string | null;
@@ -20,5 +21,6 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     if (typeof selected !== "string") return;
     const info = await setWorkspace(selected);
     set({ root: info.root, name: info.name, version: get().version + 1 });
+    void useGitStore.getState().refresh();
   },
 }));

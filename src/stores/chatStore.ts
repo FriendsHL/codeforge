@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { ChatMessage, sendMessage } from "../lib/ipc";
+import { useGitStore } from "./gitStore";
 
 // value 格式: "<provider>/<model>"，provider 对应 Rust 端 llm/registry.rs
 export const MODEL_GROUPS = [
@@ -164,6 +165,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
         }
         return { items: next, streaming: false };
       });
+      // 每轮结束刷新 git 状态（用户可能在外部改了文件；M3 写能力上线后 agent 也会改）
+      void useGitStore.getState().refresh();
     }
   },
 
