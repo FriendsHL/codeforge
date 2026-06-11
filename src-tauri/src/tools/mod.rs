@@ -3,6 +3,7 @@ pub mod fs;
 pub mod git;
 pub mod registry;
 pub mod search;
+pub mod web;
 pub mod write;
 
 use std::path::{Path, PathBuf};

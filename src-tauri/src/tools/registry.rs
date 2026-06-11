@@ -52,6 +52,8 @@ impl ToolRegistry {
                 Arc::new(super::write::WriteFileTool),
                 Arc::new(super::write::EditFileTool),
                 Arc::new(super::bash::BashTool),
+                Arc::new(super::web::WebFetchTool),
+                Arc::new(super::web::WebSearchTool),
             ],
         }
     }

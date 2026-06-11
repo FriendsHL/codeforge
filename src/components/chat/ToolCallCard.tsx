@@ -17,6 +17,8 @@ const TOOL_LABELS: Record<string, string> = {
   write_file: "写文件",
   edit_file: "改文件",
   bash: "执行命令",
+  web_fetch: "抓网页",
+  web_search: "搜索",
 };
 
 function summarizeInput(name: string, input: unknown): string {
@@ -35,6 +37,10 @@ function summarizeInput(name: string, input: unknown): string {
       return [obj.pattern, obj.include, obj.path].filter(Boolean).join("  ");
     case "bash":
       return String(obj.command ?? "");
+    case "web_fetch":
+      return String(obj.url ?? "");
+    case "web_search":
+      return String(obj.query ?? "");
     case "git_status":
       return "";
     case "git_diff":
