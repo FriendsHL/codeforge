@@ -2,8 +2,10 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { App, Badge, Empty, Modal, Segmented, Tree, Typography } from "antd";
 import type { TreeDataNode } from "antd";
 import { gitFileDiff, readDirTree, readFilePreview } from "../../lib/ipc";
+import { highlightCode, languageForPath } from "../../lib/highlight";
 import { useGitStore } from "../../stores/gitStore";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
+import { DiffView } from "./DiffView";
 
 const STATUS_COLORS: Record<string, string> = {
   M: "#d46b08",
@@ -43,28 +45,6 @@ function attachChildren(
     }
     return node;
   });
-}
-
-/** 简单的 diff 文本着色 */
-function DiffText({ diff }: { diff: string }) {
-  return (
-    <pre className="file-preview">
-      {diff.split("\n").map((line, i) => {
-        const cls = line.startsWith("+")
-          ? "diff-add"
-          : line.startsWith("-")
-            ? "diff-del"
-            : line.startsWith("@@")
-              ? "diff-hunk"
-              : "";
-        return (
-          <div key={i} className={cls}>
-            {line || " "}
-          </div>
-        );
-      })}
-    </pre>
-  );
 }
 
 export function Explorer() {
@@ -221,7 +201,18 @@ export function Explorer() {
         {preview?.truncated && (
           <Typography.Text type="warning">文件过大，仅显示前 200KB</Typography.Text>
         )}
-        <pre className="file-preview">{preview?.content}</pre>
+        {preview && (
+          <pre className="file-preview">
+            <code
+              dangerouslySetInnerHTML={{
+                __html:
+                  preview.content.length > 150_000
+                    ? preview.content.replace(/&/g, "&amp;").replace(/</g, "&lt;")
+                    : highlightCode(preview.content, languageForPath(preview.path)),
+              }}
+            />
+          </pre>
+        )}
       </Modal>
 
       <Modal
@@ -231,7 +222,7 @@ export function Explorer() {
         footer={null}
         width="72vw"
       >
-        {diff && <DiffText diff={diff.text} />}
+        {diff && <DiffView path={diff.path} diff={diff.text} />}
       </Modal>
     </div>
   );

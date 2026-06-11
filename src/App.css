@@ -122,19 +122,66 @@ body {
   text-align: left;
 }
 
-.diff-add {
+.diff-view {
+  max-height: 70vh;
+  overflow: auto;
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.diff-row {
+  display: flex;
+  white-space: pre;
+}
+
+.diff-gutter {
+  min-width: 42px;
+  padding-right: 8px;
+  text-align: right;
+  color: #bbb;
+  user-select: none;
+  background: #fafafa;
+  flex-shrink: 0;
+}
+
+.diff-marker {
+  width: 18px;
+  text-align: center;
+  user-select: none;
+  flex-shrink: 0;
+  color: #999;
+}
+
+.diff-code {
+  flex: 1;
+  padding-right: 12px;
+}
+
+.diff-row-add {
   background: #f0fff0;
+}
+
+.diff-row-add .diff-marker {
   color: #237804;
+  font-weight: 700;
 }
 
-.diff-del {
+.diff-row-del {
   background: #fff1f0;
-  color: #a8071a;
 }
 
-.diff-hunk {
-  color: #1677ff;
+.diff-row-del .diff-marker {
+  color: #a8071a;
+  font-weight: 700;
+}
+
+.diff-hunk-row {
   background: #f0f5ff;
+  color: #1677ff;
+  padding: 2px 0;
 }
 
 .file-preview {
