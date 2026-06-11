@@ -38,6 +38,15 @@ pub struct ToolRegistry {
 }
 
 impl ToolRegistry {
+    /// 从任意工具集合组装（内置 + MCP + 将来其他来源）
+    pub fn from_tools(tools: Vec<Arc<dyn Tool>>) -> Self {
+        Self { tools }
+    }
+
+    pub fn all(&self) -> Vec<Arc<dyn Tool>> {
+        self.tools.clone()
+    }
+
     /// v1 内置只读工具集
     pub fn builtin() -> Self {
         Self {

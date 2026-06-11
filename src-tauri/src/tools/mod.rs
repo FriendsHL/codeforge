@@ -1,6 +1,7 @@
 pub mod bash;
 pub mod fs;
 pub mod git;
+pub mod mcp_adapter;
 pub mod registry;
 pub mod search;
 pub mod skill;

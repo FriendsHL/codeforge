@@ -3,6 +3,7 @@ mod commands;
 mod config;
 mod git;
 mod llm;
+mod mcp;
 mod pty;
 mod security;
 mod session;
@@ -35,6 +36,18 @@ pub fn run() {
             let store = session::SessionStore::open(&data_dir.join("codeforge.db"))
                 .map_err(std::io::Error::other)?;
             app.manage(commands::session::SessionState(store));
+
+            // MCP：先 manage 空状态保证 UI 可查询，连接在后台线程做（server 握手可能秒级）
+            let config_path = data_dir.join("mcp.json");
+            app.manage(commands::mcp::McpState {
+                manager: std::sync::Mutex::new(Arc::new(mcp::McpManager::default())),
+                config_path: config_path.clone(),
+            });
+            let handle = app.handle().clone();
+            std::thread::spawn(move || {
+                let manager = Arc::new(mcp::McpManager::load(&config_path));
+                *handle.state::<commands::mcp::McpState>().manager.lock().unwrap() = manager;
+            });
             Ok(())
         })
         .manage(AppState {
@@ -61,6 +74,9 @@ pub fn run() {
             commands::session::delete_session,
             commands::session::load_session_items,
             commands::session::save_session_items,
+            commands::mcp::mcp_status,
+            commands::mcp::mcp_reload,
+            commands::mcp::mcp_config_path,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

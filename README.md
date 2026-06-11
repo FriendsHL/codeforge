@@ -4,10 +4,13 @@ A coding agent desktop app for macOS — sibling project of skillForge.
 
 打开一个本地项目，和 agent 对话：它会自己读代码、改代码（经你审批）、跑测试自我纠错，全程可见可控。
 
-## 功能（v1.0）
+## 功能（v1.1）
 
 - **Agent loop**：自研 tool-use 循环，支持多轮工具链式调用（上限 30 轮）
-- **10 个内置工具**：read_file / list_dir / glob / grep / git_status / git_diff / git_log / write_file / edit_file / bash
+- **13 个内置工具**：read_file / list_dir / glob / grep / git_status / git_diff / git_log / write_file / edit_file / bash / web_fetch / web_search / load_skill
+- **联网**：web_search（Tavily 可选，DuckDuckGo 零配置兜底）+ web_fetch（HTML 转可读文本）
+- **技能系统**：`<workspace>/.codeforge/skills/` 与 `~/.codeforge/skills/` 下的 SKILL.md 指令包，清单注入 prompt、正文按需加载；可直接放入 skillForge 技能
+- **MCP client**：自研最小 stdio 实现（initialize / tools/list / tools/call），`mcp.json` 配置 server，工具动态进注册表（`mcp__server__tool`），统一走审批
 - **多模型**：火山方舟 Ark（doubao / glm / kimi / deepseek / minimax）、小米 MiMo、Anthropic Claude，流式输出 + 推理过程展示
 - **写操作审批**：改文件弹语法高亮 diff、跑命令弹完整命令，逐个允许或"本会话全部允许"
 - **Git 感知**：顶栏分支、文件树 M/A/D/R/? 角标、改动列表点击看 diff、文件 watcher 自动刷新
@@ -64,7 +67,23 @@ src-tauri/src/
 docs/                # ARCHITECTURE.md / ROADMAP.md
 ```
 
+## MCP 配置示例
+
+设置页可查看配置文件路径（`~/Library/Application Support/com.codeforge.desktop/mcp.json`）：
+
+```json
+{
+  "servers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+    }
+  }
+}
+```
+
+编辑后在设置里点"重新加载"。
+
 ## Roadmap
 
-v1 已完成 M1–M6（聊天 → 看代码 → 改代码+Git → 跑命令 → 持久化 → 交付）。
-v2 方向：web 工具、skill 加载（对接 skillForge）、MCP client。详见 [docs/ROADMAP.md](docs/ROADMAP.md)。
+v1（M1–M6）与 v2（M7 web / M8 skills / M9 MCP）均已完成，详见 [docs/ROADMAP.md](docs/ROADMAP.md)。

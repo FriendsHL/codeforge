@@ -1,10 +1,15 @@
+use std::sync::Arc;
+
 use tauri::ipc::Channel;
 use tauri::State;
 
 use crate::agent::events::AgentEvent;
 use crate::agent::loop_::run_agent_loop;
+use crate::commands::mcp::McpState;
 use crate::llm::registry;
 use crate::llm::types::{ChatMessage, HistoryItem};
+use crate::tools::mcp_adapter::McpToolAdapter;
+use crate::tools::registry::ToolRegistry;
 use crate::AppState;
 
 #[tauri::command]
@@ -14,12 +19,21 @@ pub async fn send_message(
     messages: Vec<ChatMessage>,
     channel: Channel<AgentEvent>,
     state: State<'_, AppState>,
+    mcp: State<'_, McpState>,
 ) -> Result<(), String> {
     let endpoint = registry::resolve(&provider)?;
     let api_key = registry::api_key_for(&endpoint)?;
     let workspace = state.workspace.lock().unwrap().clone();
-    let tool_registry = state.tools.clone();
     let permissions = state.permissions.clone();
+
+    // 内置工具 + 已连接 MCP server 的工具，组装本次请求的注册表
+    let tool_registry = {
+        let mut tools = state.tools.all();
+        for connection in mcp.manager.lock().unwrap().connections() {
+            tools.extend(McpToolAdapter::wrap_all(&connection));
+        }
+        Arc::new(ToolRegistry::from_tools(tools))
+    };
 
     let history: Vec<HistoryItem> = truncate_history(
         messages

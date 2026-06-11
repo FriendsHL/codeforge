@@ -1,7 +1,15 @@
 import { useEffect, useState } from "react";
-import { App, Input, Modal, Select, Tag, Typography } from "antd";
+import { App, Button, Input, Modal, Select, Tag, Typography } from "antd";
+import { ReloadOutlined } from "@ant-design/icons";
 import { invoke } from "@tauri-apps/api/core";
 import { MODEL_GROUPS, useChatStore } from "../../stores/chatStore";
+
+interface McpServerInfo {
+  name: string;
+  connected: boolean;
+  toolCount: number;
+  error: string | null;
+}
 
 interface KeyStatus {
   keychain: boolean;
@@ -25,6 +33,9 @@ export function SettingsModal({ open, onClose }: Props) {
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [status, setStatus] = useState<Record<string, KeyStatus>>({});
   const [saving, setSaving] = useState(false);
+  const [mcpServers, setMcpServers] = useState<McpServerInfo[]>([]);
+  const [mcpPath, setMcpPath] = useState("");
+  const [mcpReloading, setMcpReloading] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -34,7 +45,21 @@ export function SettingsModal({ open, onClose }: Props) {
         setStatus((prev) => ({ ...prev, [p.id]: s })),
       );
     }
+    void invoke<McpServerInfo[]>("mcp_status").then(setMcpServers);
+    void invoke<string>("mcp_config_path").then(setMcpPath);
   }, [open]);
+
+  const reloadMcp = async () => {
+    setMcpReloading(true);
+    try {
+      setMcpServers(await invoke<McpServerInfo[]>("mcp_reload"));
+      message.success("MCP 已重新加载");
+    } catch (e) {
+      message.error(String(e));
+    } finally {
+      setMcpReloading(false);
+    }
+  };
 
   const save = async () => {
     setSaving(true);
@@ -94,6 +119,38 @@ export function SettingsModal({ open, onClose }: Props) {
       ))}
       <Typography.Paragraph type="secondary" style={{ fontSize: 12 }}>
         密钥仅存储在 macOS Keychain，不写入磁盘明文；留空表示不修改。
+      </Typography.Paragraph>
+
+      <Typography.Paragraph strong style={{ marginTop: 16 }}>
+        MCP 服务器
+        <Button
+          size="small"
+          icon={<ReloadOutlined />}
+          loading={mcpReloading}
+          onClick={() => void reloadMcp()}
+          style={{ marginLeft: 8 }}
+        >
+          重新加载
+        </Button>
+      </Typography.Paragraph>
+      {mcpServers.length === 0 ? (
+        <Typography.Paragraph type="secondary" style={{ fontSize: 12 }}>
+          未配置。编辑下方配置文件添加 stdio MCP server 后点"重新加载"。
+        </Typography.Paragraph>
+      ) : (
+        mcpServers.map((s) => (
+          <div key={s.name} style={{ fontSize: 13, marginBottom: 4 }}>
+            {s.connected ? <Tag color="green">已连接</Tag> : <Tag color="red">失败</Tag>}
+            {s.name}
+            {s.connected && (
+              <span style={{ color: "#999", marginLeft: 6 }}>{s.toolCount} 个工具</span>
+            )}
+            {s.error && <span style={{ color: "#cf1322", marginLeft: 6 }}>{s.error}</span>}
+          </div>
+        ))
+      )}
+      <Typography.Paragraph type="secondary" style={{ fontSize: 12 }} copyable={{ text: mcpPath }}>
+        配置文件：{mcpPath}
       </Typography.Paragraph>
     </Modal>
   );

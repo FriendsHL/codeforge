@@ -391,4 +391,89 @@ mod tests {
         );
         assert!(text.contains("FORGE-2026"), "回答应包含技能要求的暗号: {text}");
     }
+
+    /// 真实 API 集成测试：agent 经审批调用 MCP server 的工具
+    /// cargo test live_agent_calls_mcp -- --ignored --nocapture
+    #[tokio::test]
+    #[ignore]
+    async fn live_agent_calls_mcp_tool() {
+        let endpoint = registry::resolve("ark").unwrap();
+        let api_key = registry::api_key_for(&endpoint).unwrap();
+
+        // 假 MCP server：提供 get_weather 工具，固定返回特征字符串
+        let script = r#"
+import sys, json
+for line in sys.stdin:
+    msg = json.loads(line)
+    mid = msg.get("id"); method = msg.get("method", "")
+    if method == "initialize":
+        out = {"jsonrpc":"2.0","id":mid,"result":{"protocolVersion":"2024-11-05","serverInfo":{"name":"weather"}}}
+    elif method == "tools/list":
+        out = {"jsonrpc":"2.0","id":mid,"result":{"tools":[{"name":"get_weather","description":"查询某城市当前天气","inputSchema":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}]}}
+    elif method == "tools/call":
+        city = msg["params"]["arguments"]["city"]
+        out = {"jsonrpc":"2.0","id":mid,"result":{"content":[{"type":"text","text":city+" 当前天气：晴，26 度，风速 MCP-7"}]}}
+    elif mid is None:
+        continue
+    else:
+        out = {"jsonrpc":"2.0","id":mid,"error":{"code":-32601,"message":"unknown"}}
+    sys.stdout.write(json.dumps(out)+"\n"); sys.stdout.flush()
+"#;
+        let dir = tempfile::tempdir().unwrap();
+        let script_path = dir.path().join("weather_mcp.py");
+        std::fs::write(&script_path, script).unwrap();
+
+        let connection = Arc::new(
+            crate::mcp::McpConnection::connect(
+                "weather",
+                &crate::mcp::McpServerConfig {
+                    command: "python3".into(),
+                    args: vec![script_path.to_string_lossy().to_string()],
+                    env: Default::default(),
+                },
+            )
+            .unwrap(),
+        );
+
+        // 内置 + MCP 工具组装注册表（与 send_message 同款逻辑）
+        let mut tools = ToolRegistry::builtin().all();
+        tools.extend(crate::tools::mcp_adapter::McpToolAdapter::wrap_all(&connection));
+        let registry_combined = Arc::new(ToolRegistry::from_tools(tools));
+
+        let permissions = Arc::new(PermissionManager::default());
+        let pm = permissions.clone();
+        let mcp_called = std::sync::atomic::AtomicBool::new(false);
+        let final_text = std::sync::Mutex::new(String::new());
+
+        run_agent_loop(
+            &endpoint,
+            &api_key,
+            "doubao-seed-2.0-pro",
+            vec![HistoryItem::User("用工具查一下杭州现在的天气".into())],
+            registry_combined,
+            Some(dir.path().canonicalize().unwrap()),
+            permissions,
+            |event| match event {
+                AgentEvent::PermissionAsk { request_id, summary, .. } => {
+                    println!(">> 审批(自动放行): {summary}");
+                    pm.resolve(&request_id, true, false).unwrap();
+                }
+                AgentEvent::ToolCallStart { name, input, .. } => {
+                    println!(">> 工具调用: {name} {input}");
+                    if name.starts_with("mcp__weather__") {
+                        mcp_called.store(true, std::sync::atomic::Ordering::SeqCst);
+                    }
+                }
+                AgentEvent::TextDelta { text } => final_text.lock().unwrap().push_str(&text),
+                _ => {}
+            },
+        )
+        .await
+        .unwrap();
+
+        let text = final_text.lock().unwrap().clone();
+        println!("最终回答:\n{text}");
+        assert!(mcp_called.load(std::sync::atomic::Ordering::SeqCst), "应调用 MCP 工具");
+        assert!(text.contains("MCP-7"), "回答应包含 MCP 工具返回的特征值: {text}");
+    }
 }
