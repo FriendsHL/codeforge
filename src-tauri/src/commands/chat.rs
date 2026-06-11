@@ -19,6 +19,7 @@ pub async fn send_message(
     let api_key = registry::api_key_for(&endpoint)?;
     let workspace = state.workspace.lock().unwrap().clone();
     let tool_registry = state.tools.clone();
+    let permissions = state.permissions.clone();
 
     let history: Vec<HistoryItem> = messages
         .into_iter()
@@ -40,6 +41,7 @@ pub async fn send_message(
         history,
         tool_registry,
         workspace,
+        permissions,
         &on_event,
     )
     .await;
@@ -48,4 +50,15 @@ pub async fn send_message(
         on_event(AgentEvent::Error { message: message.clone() });
     }
     result
+}
+
+/// 前端对 PermissionAsk 的决议
+#[tauri::command]
+pub fn approve_permission(
+    request_id: String,
+    approved: bool,
+    allow_all: bool,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    state.permissions.resolve(&request_id, approved, allow_all)
 }

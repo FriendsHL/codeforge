@@ -17,6 +17,14 @@ pub enum AgentEvent {
         output: String,
         is_error: bool,
     },
+    /// 写操作审批请求：前端弹 diff，用户经 approve_permission 决议
+    #[serde(rename_all = "camelCase")]
+    PermissionAsk {
+        request_id: String,
+        tool_name: String,
+        path: String,
+        diff: String,
+    },
     #[serde(rename_all = "camelCase")]
     TurnEnd {
         stop_reason: Option<String>,

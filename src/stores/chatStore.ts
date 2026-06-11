@@ -51,6 +51,14 @@ export type ChatItem =
       output?: string;
       isError?: boolean;
       done: boolean;
+    }
+  | {
+      kind: "approval";
+      requestId: string;
+      toolName: string;
+      path: string;
+      diff: string;
+      decision?: "approved" | "denied" | "allowAll";
     };
 
 interface ChatState {
@@ -148,6 +156,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
                   : item,
               ),
             );
+            break;
+          case "permissionAsk":
+            update((items) => {
+              items.push({
+                kind: "approval",
+                requestId: event.requestId,
+                toolName: event.toolName,
+                path: event.path,
+                diff: event.diff,
+              });
+              return items;
+            });
             break;
           case "error":
             set({ error: event.message });

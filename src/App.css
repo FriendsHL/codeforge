@@ -122,6 +122,32 @@ body {
   text-align: left;
 }
 
+.approval-card {
+  align-self: stretch;
+  max-width: 90%;
+  border: 1px solid #ffd591;
+  border-radius: 10px;
+  background: #fffbf5;
+  padding: 10px 12px;
+}
+
+.approval-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.approval-card .diff-view {
+  max-height: 320px;
+  background: #fff;
+}
+
+.approval-actions {
+  margin-top: 10px;
+}
+
 .diff-view {
   max-height: 70vh;
   overflow: auto;

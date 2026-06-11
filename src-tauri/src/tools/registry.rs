@@ -7,9 +7,20 @@ use serde_json::Value;
 
 use crate::llm::types::ToolSpec;
 
+/// 写类工具的改动预演：loop 据此向用户发起审批
+#[derive(Debug, Clone)]
+pub struct WritePlan {
+    pub path: String,
+    pub diff: String,
+}
+
 pub trait Tool: Send + Sync {
     fn spec(&self) -> ToolSpec;
     fn run(&self, workspace: &Path, input: &Value) -> Result<String, String>;
+    /// 返回 Some(plan) 的工具属于写操作，执行前必须经用户审批；只读工具保持默认 None
+    fn plan(&self, _workspace: &Path, _input: &Value) -> Result<Option<WritePlan>, String> {
+        Ok(None)
+    }
 }
 
 pub struct ToolRegistry {
@@ -28,6 +39,8 @@ impl ToolRegistry {
                 Arc::new(super::git::GitStatusTool),
                 Arc::new(super::git::GitDiffTool),
                 Arc::new(super::git::GitLogTool),
+                Arc::new(super::write::WriteFileTool),
+                Arc::new(super::write::EditFileTool),
             ],
         }
     }

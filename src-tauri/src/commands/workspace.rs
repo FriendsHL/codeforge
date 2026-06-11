@@ -1,7 +1,9 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
 
+use notify::Watcher;
 use serde::Serialize;
-use tauri::State;
+use tauri::{AppHandle, Emitter, State};
 
 use crate::tools::resolve_in_workspace;
 use crate::AppState;
@@ -32,7 +34,11 @@ pub struct FilePreview {
 }
 
 #[tauri::command]
-pub fn set_workspace(path: String, state: State<'_, AppState>) -> Result<WorkspaceInfo, String> {
+pub fn set_workspace(
+    path: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<WorkspaceInfo, String> {
     let canonical = PathBuf::from(&path)
         .canonicalize()
         .map_err(|e| format!("目录不可访问: {e}"))?;
@@ -44,8 +50,46 @@ pub fn set_workspace(path: String, state: State<'_, AppState>) -> Result<Workspa
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| canonical.display().to_string());
     let info = WorkspaceInfo { root: canonical.display().to_string(), name };
-    *state.workspace.lock().unwrap() = Some(canonical);
+    *state.workspace.lock().unwrap() = Some(canonical.clone());
+    state.permissions.reset(); // 换项目后重置"全部允许"
+    start_watcher(&canonical, app, &state)?;
     Ok(info)
+}
+
+/// 监听工作区文件变化，节流后向前端发 workspace-fs-changed 事件
+fn start_watcher(workspace: &Path, app: AppHandle, state: &State<'_, AppState>) -> Result<(), String> {
+    let (tx, rx) = std::sync::mpsc::channel::<()>();
+
+    let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
+        if let Ok(event) = res {
+            // .git 内部的索引/锁文件变化极频繁，仅放行 HEAD（感知分支切换）
+            let relevant = event.paths.iter().any(|p| {
+                let s = p.to_string_lossy();
+                !s.contains("/.git/") || s.ends_with("/.git/HEAD")
+            });
+            if relevant {
+                let _ = tx.send(());
+            }
+        }
+    })
+    .map_err(|e| format!("启动文件监听失败: {e}"))?;
+
+    watcher
+        .watch(workspace, notify::RecursiveMode::Recursive)
+        .map_err(|e| format!("监听目录失败: {e}"))?;
+    *state.watcher.lock().unwrap() = Some(watcher); // 旧 watcher 随之 drop 停止
+
+    std::thread::spawn(move || {
+        // 节流：收到事件后静默 500ms 合并后续抖动，再通知前端
+        while rx.recv().is_ok() {
+            std::thread::sleep(Duration::from_millis(500));
+            while rx.try_recv().is_ok() {}
+            if app.emit("workspace-fs-changed", ()).is_err() {
+                break;
+            }
+        }
+    });
+    Ok(())
 }
 
 #[tauri::command]

@@ -10,6 +10,7 @@ use super::prompt;
 use crate::llm::registry::Endpoint;
 use crate::llm::types::{AssistantTurn, HistoryItem, LlmDelta, ToolSpec};
 use crate::llm::{anthropic, openai};
+use crate::security::PermissionManager;
 use crate::tools::registry::ToolRegistry;
 
 const MAX_ITERATIONS: usize = 30;
@@ -23,6 +24,7 @@ pub async fn run_agent_loop(
     mut history: Vec<HistoryItem>,
     registry: Arc<ToolRegistry>,
     workspace: Option<PathBuf>,
+    permissions: Arc<PermissionManager>,
     on_event: impl Fn(AgentEvent),
 ) -> Result<(), String> {
     let system = prompt::build_system_prompt(workspace.as_deref());
@@ -58,7 +60,16 @@ pub async fn run_agent_loop(
                 input: input.clone(),
             });
 
-            let result = execute_tool(&registry, workspace.as_ref(), &call.name, input).await;
+            let result = execute_tool(
+                &registry,
+                workspace.as_ref(),
+                &permissions,
+                &call.id,
+                &call.name,
+                input,
+                &on_event,
+            )
+            .await;
             let (content, is_error) = match result {
                 Ok(content) => (content, false),
                 Err(message) => (message, true),
@@ -108,8 +119,11 @@ async fn call_llm(
 async fn execute_tool(
     registry: &Arc<ToolRegistry>,
     workspace: Option<&PathBuf>,
+    permissions: &Arc<PermissionManager>,
+    call_id: &str,
     name: &str,
     input: Value,
+    on_event: &impl Fn(AgentEvent),
 ) -> Result<String, String> {
     let Some(workspace) = workspace.cloned() else {
         return Err("未打开工作区，无法使用工具".into());
@@ -117,6 +131,32 @@ async fn execute_tool(
     let Some(tool) = registry.get(name) else {
         return Err(format!("未知工具: {name}"));
     };
+
+    // 写类工具先预演 diff 走审批
+    let plan = {
+        let tool = tool.clone();
+        let workspace = workspace.clone();
+        let input = input.clone();
+        tokio::task::spawn_blocking(move || tool.plan(&workspace, &input))
+            .await
+            .map_err(|e| format!("工具执行崩溃: {e}"))??
+    };
+    if let Some(plan) = plan {
+        if !permissions.is_allow_all() {
+            // 先注册再发事件，避免决议先于等待到达的竞态
+            let rx = permissions.register(call_id);
+            on_event(AgentEvent::PermissionAsk {
+                request_id: call_id.to_string(),
+                tool_name: name.to_string(),
+                path: plan.path,
+                diff: plan.diff,
+            });
+            if !permissions.wait(call_id, rx).await {
+                return Err("用户拒绝了本次改动。请询问用户的意图后再调整方案，不要原样重试。".into());
+            }
+        }
+    }
+
     // 文件 IO 放到阻塞线程池，避免卡住异步运行时
     tokio::task::spawn_blocking(move || tool.run(&workspace, &input))
         .await
@@ -160,6 +200,7 @@ mod tests {
             history,
             Arc::new(ToolRegistry::builtin()),
             Some(workspace),
+            Arc::new(PermissionManager::default()),
             |event| match event {
                 AgentEvent::ToolCallStart { name, input, .. } => {
                     tool_call_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -185,5 +226,54 @@ mod tests {
             text.contains("read_file") && text.contains("grep"),
             "回答应包含真实的工具名，实际: {text}"
         );
+    }
+
+    /// 真实 API 集成测试：agent 改文件 + 审批放行后真正落盘
+    /// cargo test live_agent_edits -- --ignored --nocapture
+    #[tokio::test]
+    #[ignore]
+    async fn live_agent_edits_file_after_approval() {
+        let endpoint = registry::resolve("ark").unwrap();
+        let api_key = registry::api_key_for(&endpoint).unwrap();
+
+        let dir = tempfile::tempdir().unwrap();
+        let workspace = dir.path().canonicalize().unwrap();
+        std::fs::write(workspace.join("notes.txt"), "hello codeforge\n").unwrap();
+
+        let permissions = Arc::new(PermissionManager::default());
+        let pm = permissions.clone();
+        let asked = std::sync::atomic::AtomicBool::new(false);
+
+        run_agent_loop(
+            &endpoint,
+            &api_key,
+            "doubao-seed-2.0-pro",
+            vec![HistoryItem::User(
+                "把 notes.txt 里的 hello 改成 goodbye，其他内容不动。".into(),
+            )],
+            Arc::new(ToolRegistry::builtin()),
+            Some(workspace.clone()),
+            permissions,
+            |event| match event {
+                AgentEvent::PermissionAsk { request_id, path, diff, .. } => {
+                    println!(">> 审批请求: {path}\n{diff}");
+                    asked.store(true, std::sync::atomic::Ordering::SeqCst);
+                    assert!(diff.contains("-hello codeforge"));
+                    assert!(diff.contains("+goodbye codeforge"));
+                    pm.resolve(&request_id, true, false).unwrap(); // 模拟用户点"允许"
+                }
+                AgentEvent::ToolCallStart { name, input, .. } => {
+                    println!(">> 工具调用: {name} {input}");
+                }
+                _ => {}
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(asked.load(std::sync::atomic::Ordering::SeqCst), "应弹出审批");
+        let content = std::fs::read_to_string(workspace.join("notes.txt")).unwrap();
+        assert_eq!(content, "goodbye codeforge\n", "审批通过后文件应已修改");
+        println!("文件最终内容: {content}");
     }
 }

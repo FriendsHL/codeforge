@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { App as AntdApp, Button, ConfigProvider, Tag, Tooltip } from "antd";
 import { BranchesOutlined, FolderOpenOutlined, SettingOutlined } from "@ant-design/icons";
 import { ChatView } from "./components/chat/ChatView";
@@ -23,6 +24,16 @@ function App() {
       if (!configured) setSettingsOpen(true);
     });
   }, [model]);
+
+  // 文件 watcher：agent/用户改了文件 → 刷新 git 状态（分支、角标、改动列表）
+  useEffect(() => {
+    const unlisten = listen("workspace-fs-changed", () => {
+      void useGitStore.getState().refresh();
+    });
+    return () => {
+      void unlisten.then((fn) => fn());
+    };
+  }, []);
 
   return (
     <ConfigProvider theme={{ token: { colorPrimary: "#d46b08" } }}>

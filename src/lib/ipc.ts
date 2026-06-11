@@ -10,6 +10,7 @@ export type AgentEvent =
   | { type: "reasoningDelta"; text: string }
   | { type: "toolCallStart"; id: string; name: string; input: unknown }
   | { type: "toolCallEnd"; id: string; output: string; isError: boolean }
+  | { type: "permissionAsk"; requestId: string; toolName: string; path: string; diff: string }
   | { type: "turnEnd"; stopReason: string | null; outputTokens: number | null }
   | { type: "error"; message: string };
 
@@ -66,3 +67,6 @@ export interface GitOverview {
 export const gitOverview = () => invoke<GitOverview | null>("git_overview");
 
 export const gitFileDiff = (path: string) => invoke<string>("git_file_diff", { path });
+
+export const approvePermission = (requestId: string, approved: boolean, allowAll: boolean) =>
+  invoke<void>("approve_permission", { requestId, approved, allowAll });

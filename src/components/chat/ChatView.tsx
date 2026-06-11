@@ -4,6 +4,7 @@ import { ClearOutlined, SendOutlined } from "@ant-design/icons";
 import ReactMarkdown from "react-markdown";
 import { useChatStore } from "../../stores/chatStore";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
+import { ApprovalCard } from "./ApprovalCard";
 import { ToolCallCard } from "./ToolCallCard";
 
 export function ChatView() {
@@ -34,6 +35,8 @@ export function ChatView() {
         {items.map((item, index) =>
           item.kind === "tool" ? (
             <ToolCallCard key={item.id} item={item} />
+          ) : item.kind === "approval" ? (
+            <ApprovalCard key={item.requestId} item={item} />
           ) : (
             <div key={index} className={`chat-bubble chat-bubble-${item.role}`}>
               {item.reasoning && <div className="chat-reasoning">{item.reasoning}</div>}
