@@ -15,7 +15,7 @@ M1 是最薄的端到端打通，后面每步在其上叠加。
 
 **验收**：填入 API key，发"你好"，看到流式回复。
 
-## M2 — 能看代码 目标：agent 自主读代码并回答项目问题
+## M2 — 能看代码 ✅（v0.2，2026-06-11 验收通过）
 
 引入 agent loop 和只读工具，这是项目的心脏。
 
@@ -30,17 +30,25 @@ M1 是最薄的端到端打通，后面每步在其上叠加。
 **验收**：打开 skillForge 目录，左侧能浏览全部文件、点开任意文件看内容；
 问"这个项目的启动流程是怎样的？"，agent 自己翻代码后给出正确回答。
 
-## M3 — 能改代码 目标：agent 写代码，用户审批 diff
+## M3 — 能改代码 + Git 感知 目标：agent 写代码用户审批 diff；界面和 agent 都懂 git
 
-价值跃迁点：从"问答工具"变成"coding agent"。
+价值跃迁点：从"问答工具"变成"coding agent"。Git 能力和 diff 审批天然一体，合并推进。
 
-1. 写工具：write_file / edit_file（精确字符串替换）
-2. `security/policy.rs`：审批机制（PermissionAsk 事件 + oneshot 等待）
-3. diff 计算（similar crate）+ 前端 diff 审查视图（approve / reject）
-4. 会话级"全部允许"开关
-5. 文件 watcher（notify crate）：agent 改动文件后，文件树和打开的预览自动刷新
+**Git 感知（先做，读写都依赖它）**
+1. `git/` 模块：封装 git CLI（status / branch / diff / log，只读）
+2. 顶栏显示当前分支；改动文件列表视图（git status，类似 IDE 的 Changes 面板）
+3. 文件树角标：M（修改）/ A（新增）/ ?（未跟踪）
+4. agent 只读工具：git_status / git_diff / git_log（agent 能感知"用户正在改什么"）
 
-**验收**：让 agent "给 README 加一节使用说明"，弹出 diff，点确认后文件真的改了。
+**写能力 + 审批**
+5. 写工具：write_file / edit_file（精确字符串替换）
+6. `security/policy.rs`：审批机制（PermissionAsk 事件 + oneshot 等待）
+7. diff 计算（similar crate）+ 前端 diff 审查视图（approve / reject）
+8. 会话级"全部允许"开关
+9. 文件 watcher（notify crate）：agent/用户改动文件后，文件树、角标、改动列表自动刷新
+
+**验收**：打开有改动的 git 项目，顶栏显示分支、树上有角标、能看改动列表；
+让 agent "给 README 加一节使用说明"，弹出 diff，点确认后文件真的改了，角标随之更新。
 
 ## M4 — 能跑命令 目标：agent 执行测试/构建，形成自我纠错闭环
 
