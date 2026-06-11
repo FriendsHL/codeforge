@@ -39,6 +39,65 @@ body {
   flex: 1;
 }
 
+.app-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.app-sider {
+  width: 280px;
+  min-width: 280px;
+  overflow-y: auto;
+  background: #fff;
+  border-right: 1px solid #f0f0f0;
+  padding: 8px 4px;
+}
+
+.explorer .ant-tree {
+  font-size: 13px;
+}
+
+.file-preview {
+  max-height: 70vh;
+  overflow: auto;
+  background: #f6f6f6;
+  padding: 12px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+}
+
+.tool-card {
+  align-self: stretch;
+  max-width: 76%;
+  background: #fffbf5;
+}
+
+.tool-card-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tool-card-summary {
+  color: #888;
+  font-size: 12px;
+  max-width: 360px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-card-output {
+  max-height: 240px;
+  overflow: auto;
+  margin: 0;
+  font-size: 12px;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  white-space: pre-wrap;
+}
+
 .chat-view {
   display: flex;
   flex-direction: column;

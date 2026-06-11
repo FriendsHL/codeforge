@@ -1,38 +1,11 @@
-use serde::Serialize;
 use tauri::ipc::Channel;
+use tauri::State;
 
-use crate::llm::registry::{self, Endpoint};
-use crate::llm::types::{ChatMessage, LlmEvent};
-use crate::llm::{anthropic, openai};
-
-/// 推送给前端的统一事件协议（M2 起会扩展 ToolCallStart / PermissionAsk 等）
-#[derive(Debug, Clone, Serialize)]
-#[serde(tag = "type", rename_all = "camelCase")]
-pub enum AgentEvent {
-    #[serde(rename_all = "camelCase")]
-    TextDelta { text: String },
-    #[serde(rename_all = "camelCase")]
-    ReasoningDelta { text: String },
-    #[serde(rename_all = "camelCase")]
-    TurnEnd {
-        stop_reason: Option<String>,
-        output_tokens: Option<u64>,
-    },
-    #[serde(rename_all = "camelCase")]
-    Error { message: String },
-}
-
-impl From<LlmEvent> for AgentEvent {
-    fn from(event: LlmEvent) -> Self {
-        match event {
-            LlmEvent::TextDelta(text) => AgentEvent::TextDelta { text },
-            LlmEvent::ReasoningDelta(text) => AgentEvent::ReasoningDelta { text },
-            LlmEvent::TurnEnd { stop_reason, output_tokens } => {
-                AgentEvent::TurnEnd { stop_reason, output_tokens }
-            }
-        }
-    }
-}
+use crate::agent::events::AgentEvent;
+use crate::agent::loop_::run_agent_loop;
+use crate::llm::registry;
+use crate::llm::types::{ChatMessage, HistoryItem};
+use crate::AppState;
 
 #[tauri::command]
 pub async fn send_message(
@@ -40,25 +13,39 @@ pub async fn send_message(
     model: String,
     messages: Vec<ChatMessage>,
     channel: Channel<AgentEvent>,
+    state: State<'_, AppState>,
 ) -> Result<(), String> {
     let endpoint = registry::resolve(&provider)?;
     let api_key = registry::api_key_for(&endpoint)?;
+    let workspace = state.workspace.lock().unwrap().clone();
+    let tool_registry = state.tools.clone();
 
-    let on_event = |event: LlmEvent| {
-        let _ = channel.send(event.into());
+    let history: Vec<HistoryItem> = messages
+        .into_iter()
+        .filter(|m| !m.content.is_empty())
+        .map(|m| match m.role.as_str() {
+            "assistant" => HistoryItem::Assistant { text: m.content, tool_calls: vec![] },
+            _ => HistoryItem::User(m.content),
+        })
+        .collect();
+
+    let on_event = |event: AgentEvent| {
+        let _ = channel.send(event);
     };
 
-    let result = match &endpoint {
-        Endpoint::Anthropic => {
-            anthropic::stream_chat(&api_key, &model, &messages, on_event).await
-        }
-        Endpoint::OpenAiCompatible { chat_url, .. } => {
-            openai::stream_chat(chat_url, &api_key, &model, &messages, on_event).await
-        }
-    };
+    let result = run_agent_loop(
+        &endpoint,
+        &api_key,
+        &model,
+        history,
+        tool_registry,
+        workspace,
+        &on_event,
+    )
+    .await;
 
     if let Err(message) = &result {
-        let _ = channel.send(AgentEvent::Error { message: message.clone() });
+        on_event(AgentEvent::Error { message: message.clone() });
     }
     result
 }

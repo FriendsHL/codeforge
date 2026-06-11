@@ -40,13 +40,20 @@ export function splitModelValue(value: string): { provider: string; model: strin
   return { provider: value.slice(0, slash), model: value.slice(slash + 1) };
 }
 
-/** UI 层消息：在 API 消息之上多一段推理过程展示 */
-export interface UiMessage extends ChatMessage {
-  reasoning?: string;
-}
+export type ChatItem =
+  | { kind: "msg"; role: "user" | "assistant"; content: string; reasoning?: string }
+  | {
+      kind: "tool";
+      id: string;
+      name: string;
+      input: unknown;
+      output?: string;
+      isError?: boolean;
+      done: boolean;
+    };
 
 interface ChatState {
-  messages: UiMessage[];
+  items: ChatItem[];
   streaming: boolean;
   error: string | null;
   model: string;
@@ -56,7 +63,7 @@ interface ChatState {
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
-  messages: [],
+  items: [],
   streaming: false,
   error: null,
   model: localStorage.getItem(MODEL_STORAGE_KEY) ?? DEFAULT_MODEL,
@@ -67,55 +74,98 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   send: async (text) => {
-    const { messages, model, streaming } = get();
+    const { items, model, streaming } = get();
     if (streaming || !text.trim()) return;
 
+    // 跨轮次历史只保留纯文本消息（工具轮次每次由 Rust 端 loop 内部重建）
     const history: ChatMessage[] = [
-      ...messages.map(({ role, content }) => ({ role, content })),
+      ...items
+        .filter((i): i is Extract<ChatItem, { kind: "msg" }> => i.kind === "msg")
+        .filter((i) => i.content.trim() !== "")
+        .map(({ role, content }) => ({ role, content })),
       { role: "user" as const, content: text },
     ];
+
     set({
-      messages: [
-        ...messages,
-        { role: "user", content: text },
-        { role: "assistant", content: "" },
-      ],
+      items: [...items, { kind: "msg", role: "user", content: text }],
       streaming: true,
       error: null,
     });
 
-    const patchLast = (patch: (last: UiMessage) => UiMessage) =>
-      set((state) => {
-        const next = [...state.messages];
-        next[next.length - 1] = patch(next[next.length - 1]);
-        return { messages: next };
+    const update = (updater: (items: ChatItem[]) => ChatItem[]) =>
+      set((state) => ({ items: updater([...state.items]) }));
+
+    // textDelta/reasoningDelta 追加到末尾的 assistant 气泡；
+    // 若末尾不是 assistant（如刚执行完工具），就新开一个气泡
+    const appendToAssistant = (patch: Partial<Extract<ChatItem, { kind: "msg" }>>) =>
+      update((items) => {
+        const last = items[items.length - 1];
+        if (last?.kind === "msg" && last.role === "assistant") {
+          items[items.length - 1] = {
+            ...last,
+            content: last.content + (patch.content ?? ""),
+            reasoning: (last.reasoning ?? "") + (patch.reasoning ?? "") || last.reasoning,
+          };
+        } else {
+          items.push({
+            kind: "msg",
+            role: "assistant",
+            content: patch.content ?? "",
+            reasoning: patch.reasoning,
+          });
+        }
+        return items;
       });
 
     try {
       const { provider, model: modelId } = splitModelValue(model);
       await sendMessage(provider, modelId, history, (event) => {
-        if (event.type === "textDelta") {
-          patchLast((m) => ({ ...m, content: m.content + event.text }));
-        } else if (event.type === "reasoningDelta") {
-          patchLast((m) => ({ ...m, reasoning: (m.reasoning ?? "") + event.text }));
-        } else if (event.type === "error") {
-          set({ error: event.message });
+        switch (event.type) {
+          case "textDelta":
+            appendToAssistant({ content: event.text });
+            break;
+          case "reasoningDelta":
+            appendToAssistant({ reasoning: event.text });
+            break;
+          case "toolCallStart":
+            update((items) => {
+              items.push({
+                kind: "tool",
+                id: event.id,
+                name: event.name,
+                input: event.input,
+                done: false,
+              });
+              return items;
+            });
+            break;
+          case "toolCallEnd":
+            update((items) =>
+              items.map((item) =>
+                item.kind === "tool" && item.id === event.id
+                  ? { ...item, output: event.output, isError: event.isError, done: true }
+                  : item,
+              ),
+            );
+            break;
+          case "error":
+            set({ error: event.message });
+            break;
         }
       });
     } catch (e) {
       set({ error: String(e) });
     } finally {
       set((state) => {
-        const next = [...state.messages];
+        const next = [...state.items];
         const last = next[next.length - 1];
-        // 失败且没流出任何内容时，去掉空的 assistant 占位气泡
-        if (last?.role === "assistant" && !last.content && !last.reasoning) {
+        if (last?.kind === "msg" && last.role === "assistant" && !last.content && !last.reasoning) {
           next.pop();
         }
-        return { messages: next, streaming: false };
+        return { items: next, streaming: false };
       });
     }
   },
 
-  clear: () => set({ messages: [], error: null }),
+  clear: () => set({ items: [], error: null }),
 }));

@@ -8,8 +8,26 @@ export interface ChatMessage {
 export type AgentEvent =
   | { type: "textDelta"; text: string }
   | { type: "reasoningDelta"; text: string }
+  | { type: "toolCallStart"; id: string; name: string; input: unknown }
+  | { type: "toolCallEnd"; id: string; output: string; isError: boolean }
   | { type: "turnEnd"; stopReason: string | null; outputTokens: number | null }
   | { type: "error"; message: string };
+
+export interface WorkspaceInfo {
+  root: string;
+  name: string;
+}
+
+export interface TreeNode {
+  path: string;
+  name: string;
+  isDir: boolean;
+}
+
+export interface FilePreview {
+  content: string;
+  truncated: boolean;
+}
 
 export async function sendMessage(
   provider: string,
@@ -25,3 +43,12 @@ export async function sendMessage(
 export const setApiKey = (key: string) => invoke<void>("set_api_key", { key });
 
 export const hasApiKey = () => invoke<boolean>("has_api_key");
+
+export const setWorkspace = (path: string) =>
+  invoke<WorkspaceInfo>("set_workspace", { path });
+
+export const readDirTree = (path: string) =>
+  invoke<TreeNode[]>("read_dir_tree", { path });
+
+export const readFilePreview = (path: string) =>
+  invoke<FilePreview>("read_file_preview", { path });

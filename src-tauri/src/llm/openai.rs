@@ -1,11 +1,11 @@
-//! OpenAI 兼容协议的流式客户端（火山方舟 Ark / 小米 MiMo 等）
+//! OpenAI 兼容协议的流式客户端（火山方舟 Ark / 小米 MiMo 等），支持 tool calls
 
 use eventsource_stream::Eventsource;
 use futures_util::StreamExt;
 use serde::Deserialize;
-use serde_json::json;
+use serde_json::{json, Value};
 
-use super::types::{ChatMessage, LlmEvent};
+use super::types::{AssistantTurn, HistoryItem, LlmDelta, ToolCall, ToolSpec};
 
 #[derive(Debug, Deserialize)]
 struct StreamChunk {
@@ -29,6 +29,25 @@ struct Delta {
     content: Option<String>,
     #[serde(default)]
     reasoning_content: Option<String>,
+    #[serde(default)]
+    tool_calls: Option<Vec<ToolCallDelta>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ToolCallDelta {
+    index: usize,
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    function: Option<FunctionDelta>,
+}
+
+#[derive(Debug, Deserialize)]
+struct FunctionDelta {
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    arguments: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -37,44 +56,117 @@ struct Usage {
     completion_tokens: Option<u64>,
 }
 
-#[derive(Debug, Default, PartialEq)]
-struct ParsedChunk {
-    content: Option<String>,
-    reasoning: Option<String>,
-    finish_reason: Option<String>,
-    output_tokens: Option<u64>,
+/// 按 index 累积流式 tool_calls 片段
+#[derive(Debug, Default)]
+struct ToolCallAccumulator {
+    calls: Vec<ToolCall>,
 }
 
-fn parse_chunk(data: &str) -> Result<ParsedChunk, String> {
-    let chunk: StreamChunk =
-        serde_json::from_str(data).map_err(|e| format!("响应解析失败: {e}"))?;
-    let mut parsed = ParsedChunk {
-        output_tokens: chunk.usage.and_then(|u| u.completion_tokens),
-        ..Default::default()
-    };
-    if let Some(choice) = chunk.choices.into_iter().next() {
-        parsed.finish_reason = choice.finish_reason;
-        if let Some(delta) = choice.delta {
-            parsed.content = delta.content.filter(|s| !s.is_empty());
-            parsed.reasoning = delta.reasoning_content.filter(|s| !s.is_empty());
+impl ToolCallAccumulator {
+    fn apply(&mut self, delta: ToolCallDelta) {
+        while self.calls.len() <= delta.index {
+            self.calls.push(ToolCall {
+                id: String::new(),
+                name: String::new(),
+                arguments: String::new(),
+            });
+        }
+        let call = &mut self.calls[delta.index];
+        if let Some(id) = delta.id {
+            call.id = id;
+        }
+        if let Some(function) = delta.function {
+            if let Some(name) = function.name {
+                call.name.push_str(&name);
+            }
+            if let Some(args) = function.arguments {
+                call.arguments.push_str(&args);
+            }
         }
     }
-    Ok(parsed)
+
+    fn finish(self) -> Vec<ToolCall> {
+        self.calls
+            .into_iter()
+            .filter(|c| !c.name.is_empty())
+            .collect()
+    }
 }
 
-/// 调用 OpenAI 兼容的 chat/completions（流式），每个事件经 on_event 回调
+fn to_wire_messages(system: Option<&str>, history: &[HistoryItem]) -> Vec<Value> {
+    let mut messages = Vec::new();
+    if let Some(system) = system {
+        messages.push(json!({"role": "system", "content": system}));
+    }
+    for item in history {
+        match item {
+            HistoryItem::User(text) => {
+                messages.push(json!({"role": "user", "content": text}));
+            }
+            HistoryItem::Assistant { text, tool_calls } => {
+                let mut msg = json!({"role": "assistant", "content": text});
+                if !tool_calls.is_empty() {
+                    msg["tool_calls"] = Value::Array(
+                        tool_calls
+                            .iter()
+                            .map(|c| {
+                                json!({
+                                    "id": c.id,
+                                    "type": "function",
+                                    "function": {"name": c.name, "arguments": c.arguments},
+                                })
+                            })
+                            .collect(),
+                    );
+                }
+                messages.push(msg);
+            }
+            HistoryItem::ToolResult { call_id, content, .. } => {
+                messages.push(json!({
+                    "role": "tool",
+                    "tool_call_id": call_id,
+                    "content": content,
+                }));
+            }
+        }
+    }
+    messages
+}
+
+fn to_wire_tools(tools: &[ToolSpec]) -> Vec<Value> {
+    tools
+        .iter()
+        .map(|t| {
+            json!({
+                "type": "function",
+                "function": {
+                    "name": t.name,
+                    "description": t.description,
+                    "parameters": t.input_schema,
+                },
+            })
+        })
+        .collect()
+}
+
+/// 调用 OpenAI 兼容的 chat/completions（流式），返回完整的 assistant 轮次
 pub async fn stream_chat(
     chat_url: &str,
     api_key: &str,
     model: &str,
-    messages: &[ChatMessage],
-    mut on_event: impl FnMut(LlmEvent),
-) -> Result<(), String> {
-    let body = json!({
+    system: Option<&str>,
+    history: &[HistoryItem],
+    tools: &[ToolSpec],
+    mut on_delta: impl FnMut(LlmDelta),
+) -> Result<AssistantTurn, String> {
+    let mut body = json!({
         "model": model,
         "stream": true,
-        "messages": messages,
+        "messages": to_wire_messages(system, history),
     });
+    if !tools.is_empty() {
+        body["tools"] = Value::Array(to_wire_tools(tools));
+    }
 
     let response = reqwest::Client::new()
         .post(chat_url)
@@ -88,7 +180,7 @@ pub async fn stream_chat(
     if !response.status().is_success() {
         let status = response.status();
         let text = response.text().await.unwrap_or_default();
-        let message = serde_json::from_str::<serde_json::Value>(&text)
+        let message = serde_json::from_str::<Value>(&text)
             .ok()
             .and_then(|v| {
                 v["error"]["message"]
@@ -100,8 +192,8 @@ pub async fn stream_chat(
         return Err(format!("API 错误 ({status}): {message}"));
     }
 
-    let mut finish_reason: Option<String> = None;
-    let mut output_tokens: Option<u64> = None;
+    let mut turn = AssistantTurn::default();
+    let mut accumulator = ToolCallAccumulator::default();
 
     let mut stream = response.bytes_stream().eventsource();
     while let Some(event) = stream.next().await {
@@ -109,60 +201,95 @@ pub async fn stream_chat(
         if event.data.trim() == "[DONE]" {
             break;
         }
-        let parsed = parse_chunk(&event.data)?;
-        if let Some(text) = parsed.reasoning {
-            on_event(LlmEvent::ReasoningDelta(text));
+        let chunk: StreamChunk =
+            serde_json::from_str(&event.data).map_err(|e| format!("响应解析失败: {e}"))?;
+        if let Some(usage) = chunk.usage {
+            if usage.completion_tokens.is_some() {
+                turn.output_tokens = usage.completion_tokens;
+            }
         }
-        if let Some(text) = parsed.content {
-            on_event(LlmEvent::TextDelta(text));
-        }
-        if parsed.finish_reason.is_some() {
-            finish_reason = parsed.finish_reason;
-        }
-        if parsed.output_tokens.is_some() {
-            output_tokens = parsed.output_tokens;
+        if let Some(choice) = chunk.choices.into_iter().next() {
+            if choice.finish_reason.is_some() {
+                turn.stop_reason = choice.finish_reason;
+            }
+            if let Some(delta) = choice.delta {
+                if let Some(text) = delta.reasoning_content.filter(|s| !s.is_empty()) {
+                    on_delta(LlmDelta::Reasoning(text));
+                }
+                if let Some(text) = delta.content.filter(|s| !s.is_empty()) {
+                    turn.text.push_str(&text);
+                    on_delta(LlmDelta::Text(text));
+                }
+                if let Some(tool_deltas) = delta.tool_calls {
+                    for tool_delta in tool_deltas {
+                        accumulator.apply(tool_delta);
+                    }
+                }
+            }
         }
     }
 
-    on_event(LlmEvent::TurnEnd {
-        stop_reason: finish_reason,
-        output_tokens,
-    });
-    Ok(())
+    turn.tool_calls = accumulator.finish();
+    Ok(turn)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn parses_content_delta() {
-        let data = r#"{"choices":[{"index":0,"delta":{"content":"你好"}}]}"#;
-        let parsed = parse_chunk(data).unwrap();
-        assert_eq!(parsed.content.as_deref(), Some("你好"));
-        assert!(parsed.reasoning.is_none());
+    fn delta(json_str: &str) -> ToolCallDelta {
+        serde_json::from_str(json_str).unwrap()
     }
 
     #[test]
-    fn parses_reasoning_delta() {
-        let data = r#"{"choices":[{"index":0,"delta":{"reasoning_content":"思考中"}}]}"#;
-        let parsed = parse_chunk(data).unwrap();
-        assert_eq!(parsed.reasoning.as_deref(), Some("思考中"));
-        assert!(parsed.content.is_none());
+    fn accumulates_streamed_tool_call_fragments() {
+        let mut acc = ToolCallAccumulator::default();
+        acc.apply(delta(
+            r#"{"index":0,"id":"call_1","function":{"name":"read_file","arguments":""}}"#,
+        ));
+        acc.apply(delta(r#"{"index":0,"function":{"arguments":"{\"path\":"}}"#));
+        acc.apply(delta(r#"{"index":0,"function":{"arguments":"\"a.rs\"}"}}"#));
+        let calls = acc.finish();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].id, "call_1");
+        assert_eq!(calls[0].name, "read_file");
+        assert_eq!(calls[0].arguments, r#"{"path":"a.rs"}"#);
     }
 
     #[test]
-    fn parses_finish_reason_and_usage() {
-        let data = r#"{"choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"completion_tokens":42}}"#;
-        let parsed = parse_chunk(data).unwrap();
-        assert_eq!(parsed.finish_reason.as_deref(), Some("stop"));
-        assert_eq!(parsed.output_tokens, Some(42));
+    fn accumulates_parallel_tool_calls() {
+        let mut acc = ToolCallAccumulator::default();
+        acc.apply(delta(r#"{"index":0,"id":"c0","function":{"name":"glob","arguments":"{}"}}"#));
+        acc.apply(delta(r#"{"index":1,"id":"c1","function":{"name":"grep","arguments":"{}"}}"#));
+        let calls = acc.finish();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[1].name, "grep");
     }
 
     #[test]
-    fn tolerates_empty_choices() {
-        let data = r#"{"choices":[],"usage":{"completion_tokens":7}}"#;
-        let parsed = parse_chunk(data).unwrap();
-        assert_eq!(parsed.output_tokens, Some(7));
+    fn wire_messages_include_tool_rounds() {
+        let history = vec![
+            HistoryItem::User("看下结构".into()),
+            HistoryItem::Assistant {
+                text: String::new(),
+                tool_calls: vec![ToolCall {
+                    id: "c1".into(),
+                    name: "list_dir".into(),
+                    arguments: "{}".into(),
+                }],
+            },
+            HistoryItem::ToolResult {
+                call_id: "c1".into(),
+                name: "list_dir".into(),
+                content: "src/".into(),
+                is_error: false,
+            },
+        ];
+        let wire = to_wire_messages(Some("sys"), &history);
+        assert_eq!(wire.len(), 4);
+        assert_eq!(wire[0]["role"], "system");
+        assert_eq!(wire[2]["tool_calls"][0]["function"]["name"], "list_dir");
+        assert_eq!(wire[3]["role"], "tool");
+        assert_eq!(wire[3]["tool_call_id"], "c1");
     }
 }
