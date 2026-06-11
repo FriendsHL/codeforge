@@ -47,6 +47,8 @@ pub fn run() {
             commands::chat::approve_permission,
             commands::settings::set_api_key,
             commands::settings::has_api_key,
+            commands::settings::set_provider_key,
+            commands::settings::provider_key_status,
             commands::workspace::set_workspace,
             commands::workspace::read_dir_tree,
             commands::workspace::read_file_preview,

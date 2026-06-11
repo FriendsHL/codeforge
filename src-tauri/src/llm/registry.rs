@@ -33,7 +33,14 @@ pub fn api_key_for(endpoint: &Endpoint) -> Result<String, String> {
     match endpoint {
         Endpoint::Anthropic => config::get_api_key()?
             .ok_or_else(|| "尚未设置 Anthropic API key，请先在设置中填写".to_string()),
-        Endpoint::OpenAiCompatible { key_env, .. } => std::env::var(key_env)
-            .map_err(|_| format!("环境变量 {key_env} 未设置（请在启动 app 的终端里配置）")),
+        // 优先 Keychain（设置页填写），兜底环境变量（终端启动的 dev 场景）
+        Endpoint::OpenAiCompatible { key_env, .. } => {
+            if let Some(key) = config::get_key(key_env)? {
+                return Ok(key);
+            }
+            std::env::var(key_env).map_err(|_| {
+                format!("未配置 {key_env}：请在设置中填写，或在启动 app 的终端里配置环境变量")
+            })
+        }
     }
 }

@@ -1,31 +1,70 @@
-# CodeForge
+# ⚒️ CodeForge
 
 A coding agent desktop app for macOS — sibling project of skillForge.
 
-## Tech Stack
+打开一个本地项目，和 agent 对话：它会自己读代码、改代码（经你审批）、跑测试自我纠错，全程可见可控。
 
-- **Shell**: [Tauri 2](https://tauri.app) (Rust backend, small bundle, native performance)
-- **Frontend**: React 18 + TypeScript + Vite
-- **Platform**: macOS (Apple Silicon & Intel)
+## 功能（v1.0）
 
-## Development
+- **Agent loop**：自研 tool-use 循环，支持多轮工具链式调用（上限 30 轮）
+- **10 个内置工具**：read_file / list_dir / glob / grep / git_status / git_diff / git_log / write_file / edit_file / bash
+- **多模型**：火山方舟 Ark（doubao / glm / kimi / deepseek / minimax）、小米 MiMo、Anthropic Claude，流式输出 + 推理过程展示
+- **写操作审批**：改文件弹语法高亮 diff、跑命令弹完整命令，逐个允许或"本会话全部允许"
+- **Git 感知**：顶栏分支、文件树 M/A/D/R/? 角标、改动列表点击看 diff、文件 watcher 自动刷新
+- **IDE 式侧边栏**：会话 / 文件 / 改动 三页签；文件树懒加载、遵循 .gitignore、点击预览（语法高亮）
+- **内嵌终端**：xterm.js 实时回显 agent 执行的命令（PTY，超时强制 kill）
+- **会话持久化**：SQLite 存储，重启恢复，多会话切换/重命名/删除
+- **安全**：API key 存 macOS Keychain；工具访问限定在工作区内（拒绝路径越界）
 
-Prerequisites: Node.js ≥ 20, Rust toolchain (`rustup`), Xcode Command Line Tools.
+## 技术栈
+
+- **Shell**: [Tauri 2](https://tauri.app)（Rust 后端，~10MB 包体）
+- **前端**: React 18 + TypeScript + Vite + antd
+- **Rust 侧**: tokio / reqwest(SSE) / portable-pty / rusqlite / notify / similar / keyring
+
+## 配置
+
+模型 API key（任选其一即可使用）：
+
+| Provider | 配置方式 |
+|---|---|
+| 火山方舟 Ark | 环境变量 `ARK_API_KEY`（从配置了该变量的终端启动 app） |
+| 小米 MiMo | 环境变量 `XIAOMI_MIMO_API_KEY` |
+| Anthropic | app 内设置页填入，存 macOS Keychain |
+
+## 开发
+
+前置：Node.js ≥ 20、Rust 工具链（`rustup`）、Xcode Command Line Tools。
 
 ```bash
-npm install        # install frontend deps
-npm run tauri dev  # launch the app in dev mode (hot reload)
+npm install
+npm run tauri dev    # 开发模式（热更新）
+npm run tauri build  # 产出 .app / .dmg（src-tauri/target/release/bundle/）
+cd src-tauri && cargo test            # Rust 单元测试
+cargo test -- --ignored --nocapture   # 真实 API 集成测试（需 ARK_API_KEY）
 ```
 
-## Build
+## 安装（未签名版本说明）
 
-```bash
-npm run tauri build   # produces a .app / .dmg under src-tauri/target/release/bundle/
-```
+当前 .dmg 未做 Apple 签名/公证，首次打开需：右键 CodeForge.app → 打开 → 再点"打开"。
 
-## Project Layout
+## 项目结构
 
 ```
-src/         # React frontend
-src-tauri/   # Rust backend (Tauri commands, process management, PTY, etc.)
+src/                 # React 前端（components/stores/lib）
+src-tauri/src/
+  agent/             # 核心循环、事件协议、system prompt
+  llm/               # Anthropic + OpenAI 兼容流式客户端、provider 注册表
+  tools/             # Tool trait + 10 个内置工具（多来源注册表，预留 MCP/skill）
+  security/          # 写操作审批（oneshot + 会话级 allow-all）
+  pty/               # portable-pty 命令执行
+  git/               # git CLI 封装
+  session/           # SQLite 会话持久化
+  commands/          # Tauri IPC 入口层
+docs/                # ARCHITECTURE.md / ROADMAP.md
 ```
+
+## Roadmap
+
+v1 已完成 M1–M6（聊天 → 看代码 → 改代码+Git → 跑命令 → 持久化 → 交付）。
+v2 方向：web 工具、skill 加载（对接 skillForge）、MCP client。详见 [docs/ROADMAP.md](docs/ROADMAP.md)。
