@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { App, Empty, Modal, Tree, Typography } from "antd";
+import { App, Empty, Tree } from "antd";
 import type { TreeDataNode } from "antd";
-import { gitFileDiff, readDirTree, readFilePreview } from "../../lib/ipc";
-import { highlightCode, languageForPath } from "../../lib/highlight";
+import { readDirTree } from "../../lib/ipc";
 import { useGitStore } from "../../stores/gitStore";
+import { useViewerStore } from "../../stores/viewerStore";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
-import { DiffView } from "./DiffView";
 
 const STATUS_COLORS: Record<string, string> = {
   M: "#d46b08",
@@ -51,9 +50,8 @@ export function Explorer({ view }: { view: "files" | "changes" }) {
   const { message } = App.useApp();
   const { version } = useWorkspaceStore();
   const changes = useGitStore((s) => s.changes);
+  const { openFile, openDiff } = useViewerStore();
   const [treeData, setTreeData] = useState<TreeDataNode[]>([]);
-  const [preview, setPreview] = useState<{ path: string; content: string; truncated: boolean } | null>(null);
-  const [diff, setDiff] = useState<{ path: string; text: string } | null>(null);
 
   // 文件状态表 + 含改动的目录前缀集合（目录上显示圆点）
   const { fileStatus, dirtyDirs } = useMemo(() => {
@@ -87,33 +85,13 @@ export function Explorer({ view }: { view: "files" | "changes" }) {
     [message],
   );
 
-  const openFile = useCallback(
-    async (path: string) => {
-      try {
-        const file = await readFilePreview(path);
-        setPreview({ path, ...file });
-      } catch (e) {
-        message.error(String(e));
-      }
-    },
-    [message],
-  );
-
   const openChange = useCallback(
-    async (path: string, status: string) => {
+    (path: string, status: string) => {
       // 未跟踪/新增文件没有 diff，直接看内容
-      if (status === "?" || status === "A") {
-        void openFile(path);
-        return;
-      }
-      try {
-        const text = await gitFileDiff(path);
-        setDiff({ path, text });
-      } catch (e) {
-        message.error(String(e));
-      }
+      const action = status === "?" || status === "A" ? openFile(path) : openDiff(path);
+      void action.catch((e) => message.error(String(e)));
     },
-    [message, openFile],
+    [message, openFile, openDiff],
   );
 
   return (
@@ -137,7 +115,9 @@ export function Explorer({ view }: { view: "files" | "changes" }) {
               );
             }}
             onSelect={(_, info) => {
-              if (info.node.isLeaf) void openFile(String(info.node.key));
+              if (info.node.isLeaf) {
+                void openFile(String(info.node.key)).catch((e) => message.error(String(e)));
+              }
             }}
           />
         </div>
@@ -154,7 +134,7 @@ export function Explorer({ view }: { view: "files" | "changes" }) {
             <div
               key={c.path}
               className="changes-item"
-              onClick={() => void openChange(c.path, c.status)}
+              onClick={() => openChange(c.path, c.status)}
               title={c.path}
             >
               <StatusBadge status={c.status} />
@@ -163,40 +143,6 @@ export function Explorer({ view }: { view: "files" | "changes" }) {
           ))}
         </div>
       )}
-
-      <Modal
-        title={preview?.path}
-        open={preview !== null}
-        onCancel={() => setPreview(null)}
-        footer={null}
-        width="72vw"
-      >
-        {preview?.truncated && (
-          <Typography.Text type="warning">文件过大，仅显示前 200KB</Typography.Text>
-        )}
-        {preview && (
-          <pre className="file-preview">
-            <code
-              dangerouslySetInnerHTML={{
-                __html:
-                  preview.content.length > 150_000
-                    ? preview.content.replace(/&/g, "&amp;").replace(/</g, "&lt;")
-                    : highlightCode(preview.content, languageForPath(preview.path)),
-              }}
-            />
-          </pre>
-        )}
-      </Modal>
-
-      <Modal
-        title={`diff: ${diff?.path ?? ""}`}
-        open={diff !== null}
-        onCancel={() => setDiff(null)}
-        footer={null}
-        width="72vw"
-      >
-        {diff && <DiffView path={diff.path} diff={diff.text} />}
-      </Modal>
     </div>
   );
 }

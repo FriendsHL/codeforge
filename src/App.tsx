@@ -6,6 +6,7 @@ import { ChatView } from "./components/chat/ChatView";
 import { ProjectsPanel } from "./components/sidebar/ProjectsPanel";
 import { RightPanel } from "./components/sidebar/RightPanel";
 import { SettingsModal } from "./components/settings/SettingsModal";
+import { ViewerPanel } from "./components/viewer/ViewerPanel";
 import { hasApiKey } from "./lib/ipc";
 import { useChatStore } from "./stores/chatStore";
 import { useGitStore } from "./stores/gitStore";
@@ -67,7 +68,8 @@ function App() {
           <div className="app-body">
             <ProjectsPanel />
             <ChatView />
-            {/* 预留：浏览器面板将插在 ChatView 和 RightPanel 之间，可折叠 */}
+            {/* 文件/diff 查看器（将来浏览器面板也在这个位置） */}
+            <ViewerPanel />
             {root && <RightPanel />}
           </div>
           <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
