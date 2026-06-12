@@ -9,6 +9,7 @@ import { useWorkspaceStore } from "../../stores/workspaceStore";
 import { ApprovalCard } from "./ApprovalCard";
 import { SubagentGroup } from "./SubagentGroup";
 import { ThinkingCard } from "./ThinkingCard";
+import { TodoPanel } from "./TodoPanel";
 import { ToolCallCard } from "./ToolCallCard";
 import { TerminalPanel } from "../terminal/TerminalPanel";
 
@@ -125,6 +126,8 @@ export function ChatView() {
 
         {error && <Alert type="error" message={error} showIcon />}
       </div>
+
+      <TodoPanel />
 
       {terminalOpen && <TerminalPanel />}
 

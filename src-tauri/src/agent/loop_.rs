@@ -36,6 +36,8 @@ pub struct AgentCtx {
     pub provider: String,
     /// 本地 OTel trace 写入器（无 session 时为 None）
     pub trace: Option<Arc<crate::trace::TraceWriter>>,
+    /// agent 的任务清单（todo_write 维护，每轮作为 system-reminder 注入）
+    pub todos: crate::tools::todo::TodoList,
 }
 
 fn is_cancelled(ctx: &AgentCtx) -> bool {
@@ -133,7 +135,7 @@ async fn loop_body(
     run_span: Option<&str>,
 ) -> Result<String, String> {
     {
-        let system = prompt::build_system_prompt(ctx.workspace.as_deref(), !is_main);
+        let base_system = prompt::build_system_prompt(ctx.workspace.as_deref(), !is_main);
         let mut tools = ctx.registry.specs(ctx.workspace.is_some());
         if is_main {
             tools.push(subagent_spec());
@@ -142,6 +144,11 @@ async fn loop_body(
         let mut final_text = String::new();
 
         for iteration in 0..MAX_ITERATIONS {
+            // 任务清单作为 system-reminder 拼在 system 末尾（随清单变化，故每轮重建）
+            let system = match crate::tools::todo::reminder(&ctx.todos) {
+                Some(r) => format!("{base_system}\n\n{r}"),
+                None => base_system.clone(),
+            };
             // 轮内压缩：把超出预算的旧工具结果替换为占位（保留"读过什么"的索引）
             if iteration > 0 {
                 let pruned = prune_tool_results(&mut history);
@@ -439,24 +446,65 @@ async fn execute_tool(
     handle.await.map_err(|e| format!("工具执行崩溃: {e}"))?
 }
 
-/// 轮内工具结果预算：从最新往回数，超出后旧结果原文替换为占位。
-/// 返回本次清理的条数。
-const TOOL_RESULT_BUDGET_CHARS: usize = 60_000;
+// 轮内压缩参数
+const SINGLE_RESULT_MAX: usize = 16_000; // 单结果超此值 → 中段截断
+const SINGLE_RESULT_HEAD: usize = 6_000;
+const SINGLE_RESULT_TAIL: usize = 6_000;
+const TOOL_RESULT_BUDGET_CHARS: usize = 60_000; // 全部结果总预算
+const KEEP_HEAD_RESULTS: usize = 2; // 始终保留最早的几个（项目定位上下文）
 const PRUNED_MARK: &str = "[已清理]";
 
+/// 单个超大结果：保留前后两段，砍掉中间
+fn middle_truncate(s: &str) -> String {
+    let chars: Vec<char> = s.chars().collect();
+    if chars.len() <= SINGLE_RESULT_MAX {
+        return s.to_string();
+    }
+    let head: String = chars[..SINGLE_RESULT_HEAD].iter().collect();
+    let tail: String = chars[chars.len() - SINGLE_RESULT_TAIL..].iter().collect();
+    let dropped = chars.len() - SINGLE_RESULT_HEAD - SINGLE_RESULT_TAIL;
+    format!("{head}\n…[中间 {dropped} 字符已省略，需要完整内容请缩小范围重新调用]…\n{tail}")
+}
+
+/// 轮内压缩，两阶段：
+/// ① 单结果中段截断（保留头尾）
+/// ② 总量超预算 → 保留最早 KEEP_HEAD_RESULTS 个 + 最近的若干，中间整轮替换为占位
+/// 返回本次发生压缩的条数。
 fn prune_tool_results(history: &mut [HistoryItem]) -> usize {
-    let mut used = 0usize;
     let mut pruned = 0usize;
-    for item in history.iter_mut().rev() {
-        if let HistoryItem::ToolResult { content, name, .. } = item {
-            if content.starts_with(PRUNED_MARK) {
-                continue;
+
+    // 阶段 ①：单结果中段截断
+    for item in history.iter_mut() {
+        if let HistoryItem::ToolResult { content, .. } = item {
+            if !content.starts_with(PRUNED_MARK) && content.chars().count() > SINGLE_RESULT_MAX {
+                *content = middle_truncate(content);
+                pruned += 1;
             }
+        }
+    }
+
+    // 阶段 ②：总预算——保护最早几个，从最新往回保留，中间砍掉
+    let result_idxs: Vec<usize> = history
+        .iter()
+        .enumerate()
+        .filter(|(_, i)| {
+            matches!(i, HistoryItem::ToolResult { content, .. } if !content.starts_with(PRUNED_MARK))
+        })
+        .map(|(i, _)| i)
+        .collect();
+    let protect_head: std::collections::HashSet<usize> =
+        result_idxs.iter().take(KEEP_HEAD_RESULTS).copied().collect();
+
+    let mut used = 0usize;
+    for &i in result_idxs.iter().rev() {
+        if protect_head.contains(&i) {
+            continue; // 头部始终保留
+        }
+        if let HistoryItem::ToolResult { content, name, .. } = &mut history[i] {
             let len = content.chars().count();
             if used + len > TOOL_RESULT_BUDGET_CHARS {
-                *content = format!(
-                    "{PRUNED_MARK} {name} 的输出（{len} 字符）已超出上下文预算被移除；如仍需要请重新调用该工具"
-                );
+                *content =
+                    format!("{PRUNED_MARK} 中间步骤 {name} 的结果（{len} 字符）已省略；如仍需要请重新调用该工具");
                 pruned += 1;
             } else {
                 used += len;
@@ -493,42 +541,62 @@ mod tests {
             cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             provider: "ark".into(),
             trace: None,
+            todos: Arc::new(std::sync::Mutex::new(Vec::new())),
+        }
+    }
+
+    fn tool_result(name: &str, content: String) -> HistoryItem {
+        HistoryItem::ToolResult { call_id: name.into(), name: name.into(), content, is_error: false }
+    }
+
+    #[test]
+    fn middle_truncates_oversized_single_result() {
+        let big = "a".repeat(SINGLE_RESULT_MAX + 10_000);
+        let mut history = vec![tool_result("grep", big)];
+        let pruned = prune_tool_results(&mut history);
+        assert_eq!(pruned, 1);
+        match &history[0] {
+            HistoryItem::ToolResult { content, .. } => {
+                assert!(content.contains("中间"));
+                assert!(content.chars().count() < SINGLE_RESULT_MAX + 100);
+            }
+            _ => panic!(),
         }
     }
 
     #[test]
-    fn prunes_old_tool_results_over_budget() {
-        let big = "x".repeat(TOOL_RESULT_BUDGET_CHARS);
+    fn keeps_head_and_recent_drops_middle() {
+        // 每个 14K（< SINGLE_RESULT_MAX，不触发单结果截断），6 个非头部=84K > 60K 预算
+        let chunk = || "y".repeat(14_000);
         let mut history = vec![
             HistoryItem::User("q".into()),
-            HistoryItem::ToolResult {
-                call_id: "c1".into(),
-                name: "read_file".into(),
-                content: "旧结果".repeat(100),
-                is_error: false,
-            },
-            HistoryItem::ToolResult {
-                call_id: "c2".into(),
-                name: "grep".into(),
-                content: big.clone(),
-                is_error: false,
-            },
+            tool_result("head1", chunk()), // 受保护
+            tool_result("head2", chunk()), // 受保护
+            tool_result("m1", chunk()),    // 最旧的中间→砍
+            tool_result("m2", chunk()),    // →砍
+            tool_result("m3", chunk()),    // 最近若干→保留
+            tool_result("m4", chunk()),
+            tool_result("m5", chunk()),
+            tool_result("recent", chunk()),
         ];
-        let pruned = prune_tool_results(&mut history);
-        assert_eq!(pruned, 1, "旧的应被清理，新的（占满预算）保留");
-        match &history[1] {
-            HistoryItem::ToolResult { content, .. } => {
-                assert!(content.starts_with(PRUNED_MARK));
-                assert!(content.contains("read_file"));
-            }
-            _ => panic!(),
-        }
-        match &history[2] {
-            HistoryItem::ToolResult { content, .. } => assert_eq!(content, &big),
-            _ => panic!(),
-        }
-        // 幂等：再跑不重复清理
-        assert_eq!(prune_tool_results(&mut history), 0);
+        prune_tool_results(&mut history);
+        let kept: Vec<bool> = history
+            .iter()
+            .filter_map(|i| match i {
+                HistoryItem::ToolResult { content, .. } => Some(!content.starts_with(PRUNED_MARK)),
+                _ => None,
+            })
+            .collect();
+        // 头2保留 + 最旧两个中间被砍 + 最近的保留
+        assert_eq!(kept[0], true);
+        assert_eq!(kept[1], true);
+        assert_eq!(kept[2], false, "最旧的中间应被砍");
+        assert_eq!(*kept.last().unwrap(), true, "最近的应保留");
+        assert!(kept.iter().filter(|k| !**k).count() >= 1, "至少砍掉一个中间");
+        // 幂等
+        let before = history.len();
+        prune_tool_results(&mut history);
+        assert_eq!(history.len(), before);
     }
 
     /// 真实 API 集成测试：cargo test live_agent_loop -- --ignored --nocapture

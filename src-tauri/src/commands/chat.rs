@@ -28,11 +28,18 @@ pub async fn send_message(
     let workspace = state.workspace.lock().unwrap().clone();
     let permissions = state.permissions.clone();
 
-    // 内置工具 + browser_open（需要 AppHandle）+ 已连接 MCP server 的工具
+    // 本回合的任务清单（todo_write 维护，loop 注入为 system-reminder）
+    let todos: crate::tools::todo::TodoList = Arc::new(std::sync::Mutex::new(Vec::new()));
+
+    // 内置工具 + browser_open / todo_write（需要 AppHandle/状态）+ 已连接 MCP server 的工具
     let tool_registry = {
         let mut tools = state.tools.all();
         tools.push(Arc::new(crate::tools::browser::BrowserOpenTool { app: app.clone() })
             as Arc<dyn crate::tools::registry::Tool>);
+        tools.push(Arc::new(crate::tools::todo::TodoWriteTool {
+            todos: todos.clone(),
+            app: app.clone(),
+        }) as Arc<dyn crate::tools::registry::Tool>);
         for connection in mcp.manager.lock().unwrap().connections() {
             tools.extend(McpToolAdapter::wrap_all(&connection));
         }
@@ -83,6 +90,7 @@ pub async fn send_message(
         cancel: state.cancel.clone(),
         provider: provider.clone(),
         trace,
+        todos,
     };
     let result = run_agent_loop(&ctx, history, &on_event).await;
 
@@ -120,9 +128,10 @@ fn cheap_model_for(provider: &str) -> &'static str {
 }
 
 const COMPACT_TRIGGER_CHARS: usize = 100_000;
-const KEEP_RECENT_CHARS: usize = 40_000;
+const KEEP_RECENT_MESSAGES: usize = 10; // 保留最近 ~5 轮（user+assistant）的原文
 
-/// 超阈值时：早前对话 → 便宜模型摘要块 + 最近原文。返回 (新历史, 提示文案)
+/// 超阈值时：保留最近 N 条消息原文，更早的全部交给便宜模型做三段式摘要。
+/// 返回 (新历史, 提示文案)
 async fn compact_history(
     endpoint: &registry::Endpoint,
     api_key: &str,
@@ -134,21 +143,12 @@ async fn compact_history(
     if total <= COMPACT_TRIGGER_CHARS {
         return (history, None);
     }
-
-    // 从最新往回保留 KEEP_RECENT_CHARS 的原文，更早的进摘要
-    let mut kept = 0usize;
-    let mut split = history.len();
-    for (i, item) in history.iter().enumerate().rev() {
-        kept += item_chars(item);
-        if kept > KEEP_RECENT_CHARS {
-            split = i;
-            break;
-        }
-    }
-    if split == 0 || split >= history.len() {
+    // 太短不值得摘要（保不住最近 N 条就直接硬截断兜底）
+    if history.len() <= KEEP_RECENT_MESSAGES + 1 {
         return (truncate_history(history), Some("对话过长，已截断最早的消息".into()));
     }
 
+    let split = history.len() - KEEP_RECENT_MESSAGES;
     let old = &history[..split];
     let old_chars: usize = old.iter().map(item_chars).sum();
     let transcript: String = old
@@ -161,7 +161,7 @@ async fn compact_history(
         .collect::<Vec<_>>()
         .join("\n\n");
 
-    let system = "把下面的对话历史压缩成要点摘要：保留用户的目标与约束、已确认的决定、关键文件/路径/代码标识符、未完成的事项。用紧凑的中文要点列表，不要寒暄不要评论。";
+    let system = "你在压缩一段 coding agent 的对话历史，供后续轮次接续使用。严格输出以下三个小节（无内容写「无」），用紧凑中文要点，不要寒暄/评论：\n## 已确认的决定\n（用户目标与约束、已敲定的方案、关键文件路径与代码标识符）\n## 当前状态\n（已完成的改动、已验证的结论、当前所处步骤）\n## 待办事项\n（未完成的任务、下一步计划、遗留问题）";
     let summary_history = vec![HistoryItem::User(transcript)];
     let cheap = cheap_model_for(provider);
     let result = match endpoint {
@@ -177,15 +177,14 @@ async fn compact_history(
         Ok(turn) if !turn.text.trim().is_empty() => {
             let summary_chars = turn.text.chars().count();
             let mut compacted = vec![HistoryItem::User(format!(
-                "[早前对话的自动摘要，原文已压缩]\n{}",
+                "[早前对话的自动摘要，原文已压缩；最近 {KEEP_RECENT_MESSAGES} 条消息保留在后面]\n{}",
                 turn.text.trim()
             ))];
             compacted.extend_from_slice(&history[split..]);
             (
                 compacted,
                 Some(format!(
-                    "已把早前 {} 条消息压缩为摘要（{old_chars} → {summary_chars} 字符）",
-                    split
+                    "已把早前 {split} 条消息压缩为三段式摘要（{old_chars} → {summary_chars} 字符），保留最近 {KEEP_RECENT_MESSAGES} 条原文"
                 )),
             )
         }

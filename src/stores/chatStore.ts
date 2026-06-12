@@ -10,6 +10,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { termWrite } from "../lib/terminal";
 import { useGitStore } from "./gitStore";
 import { useSessionStore } from "./sessionStore";
+import { useTodoStore } from "./todoStore";
 
 const SLASH_HELP = `可用快捷命令：
 - \`/tools\` 当前可用工具清单
@@ -190,6 +191,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       { role: "user" as const, content: text },
     ];
 
+    useTodoStore.getState().clear(); // 新回合清空旧任务清单
     set({
       items: [...items, { kind: "msg", role: "user", content: text }],
       streaming: true,

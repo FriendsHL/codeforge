@@ -97,11 +97,11 @@ pub fn prompt_section(workspace: Option<&Path>) -> Option<String> {
     }
     let list = skills
         .iter()
-        .map(|s| format!("- {}: {}", s.name, s.description))
+        .map(|s| format!("- {} ({}/SKILL.md): {}", s.name, s.dir.display(), s.description))
         .collect::<Vec<_>>()
         .join("\n");
     Some(format!(
-        "可用技能（当任务与某技能描述匹配时，先用 load_skill 工具读取其完整指令再开始干活）：\n{list}"
+        "可用技能（每项为 名称 (SKILL.md 路径): 说明）。任务与某技能匹配时，先用 load_skill 读取其完整指令（也可直接 read_file 读上面的 SKILL.md 路径）再开始干活：\n{list}"
     ))
 }
 

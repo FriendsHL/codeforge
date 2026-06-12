@@ -666,6 +666,58 @@ body.resizing {
   max-width: 100%;
 }
 
+.todo-panel {
+  margin: 4px 16px 0;
+  border: 1px solid #ffe7ba;
+  border-radius: 8px;
+  background: #fffdf8;
+  font-size: 12.5px;
+}
+
+.todo-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  cursor: pointer;
+  user-select: none;
+  font-weight: 600;
+  color: #d46b08;
+}
+
+.todo-progress {
+  margin-left: auto;
+  color: #999;
+  font-weight: 400;
+}
+
+.todo-body {
+  padding: 2px 10px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.todo-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.todo-completed span {
+  color: #aaa;
+  text-decoration: line-through;
+}
+
+.todo-in_progress span {
+  color: #333;
+  font-weight: 500;
+}
+
+.todo-pending span {
+  color: #888;
+}
+
 .chat-notice {
   align-self: center;
   color: #aaa;

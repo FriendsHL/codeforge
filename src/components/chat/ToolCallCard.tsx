@@ -22,6 +22,7 @@ const TOOL_LABELS: Record<string, string> = {
   load_skill: "加载技能",
   spawn_subagents: "子agent团队",
   browser_open: "打开浏览器",
+  todo_write: "更新任务清单",
 };
 
 function summarizeInput(name: string, input: unknown): string {

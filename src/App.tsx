@@ -17,6 +17,7 @@ import { hasApiKey } from "./lib/ipc";
 import { useChatStore } from "./stores/chatStore";
 import { useGitStore } from "./stores/gitStore";
 import { useSessionStore } from "./stores/sessionStore";
+import { useTodoStore } from "./stores/todoStore";
 import { LIMITS, useUiStore } from "./stores/uiStore";
 import { useViewerStore } from "./stores/viewerStore";
 import { useWorkspaceStore } from "./stores/workspaceStore";
@@ -57,6 +58,16 @@ function App() {
   useEffect(() => {
     const unlisten = listen<string>("browser-open", (event) => {
       useViewerStore.getState().openBrowser(event.payload);
+    });
+    return () => {
+      void unlisten.then((fn) => fn());
+    };
+  }, []);
+
+  // agent 的 todo_write 工具 → 更新任务清单面板
+  useEffect(() => {
+    const unlisten = listen<import("./stores/todoStore").TodoItem[]>("todo-update", (event) => {
+      useTodoStore.getState().set(event.payload);
     });
     return () => {
       void unlisten.then((fn) => fn());

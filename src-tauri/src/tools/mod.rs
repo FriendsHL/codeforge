@@ -6,6 +6,7 @@ pub mod mcp_adapter;
 pub mod registry;
 pub mod search;
 pub mod skill;
+pub mod todo;
 pub mod web;
 pub mod write;
 
