@@ -409,7 +409,7 @@ body {
 
 .chat-bubble-assistant table {
   border-collapse: collapse;
-  margin: 8px 0;
+  margin: 10px 0;
   font-size: 13px;
   display: block;
   overflow-x: auto;
@@ -418,18 +418,20 @@ body {
 
 .chat-bubble-assistant th,
 .chat-bubble-assistant td {
-  border: 1px solid #e8e8e8;
-  padding: 5px 10px;
+  border: none;
+  border-bottom: 1px solid #f0f0f0;
+  padding: 6px 14px 6px 0;
   text-align: left;
+  vertical-align: top;
+  line-height: 1.55;
 }
 
 .chat-bubble-assistant th {
-  background: #fafafa;
+  color: #888;
   font-weight: 600;
-}
-
-.chat-bubble-assistant tr:nth-child(even) td {
-  background: #fcfcfc;
+  font-size: 12px;
+  border-bottom: 2px solid #e8e8e8;
+  white-space: nowrap;
 }
 
 .chat-input {

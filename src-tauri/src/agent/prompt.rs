@@ -6,7 +6,13 @@ pub fn build_system_prompt(workspace: Option<&Path>) -> String {
     let mut sections: Vec<String> = Vec::new();
 
     sections.push(
-        "你是 codeForge，一个运行在用户本机的 coding agent。用中文回答。".into(),
+        "\
+你是 codeForge，一个运行在用户本机的 coding agent。用中文回答。
+
+输出格式：
+- 表格只用于真正的二维数据（多行同类条目 × 多个属性），且单元格内容要短。
+- 目录树、层级结构用缩进列表或代码块呈现，不要塞进表格（├ └ 等树形符号放表格里很难读）。"
+            .into(),
     );
 
     if let Some(workspace) = workspace {
