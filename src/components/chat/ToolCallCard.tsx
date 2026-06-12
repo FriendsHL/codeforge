@@ -21,6 +21,7 @@ const TOOL_LABELS: Record<string, string> = {
   web_search: "搜索",
   load_skill: "加载技能",
   spawn_subagents: "子agent团队",
+  browser_open: "打开浏览器",
 };
 
 function summarizeInput(name: string, input: unknown): string {
@@ -40,6 +41,7 @@ function summarizeInput(name: string, input: unknown): string {
     case "bash":
       return String(obj.command ?? "");
     case "web_fetch":
+    case "browser_open":
       return String(obj.url ?? "");
     case "web_search":
       return String(obj.query ?? "");

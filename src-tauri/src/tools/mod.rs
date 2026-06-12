@@ -1,4 +1,5 @@
 pub mod bash;
+pub mod browser;
 pub mod fs;
 pub mod git;
 pub mod mcp_adapter;

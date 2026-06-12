@@ -7,9 +7,39 @@ import { stopGeneration } from "../../lib/ipc";
 import { ChatItem, useChatStore } from "../../stores/chatStore";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
 import { ApprovalCard } from "./ApprovalCard";
+import { SubagentGroup } from "./SubagentGroup";
 import { ThinkingCard } from "./ThinkingCard";
 import { ToolCallCard } from "./ToolCallCard";
 import { TerminalPanel } from "../terminal/TerminalPanel";
+
+type ToolItem = Extract<ChatItem, { kind: "tool" }>;
+
+/** 子 agent 的工具调用（事件 id 带 -sN- 前缀）；连续的合并为一个折叠组 */
+function isSubagentTool(item: ChatItem): item is ToolItem {
+  return item.kind === "tool" && /-s\d+-/.test(item.id);
+}
+
+type RenderBlock =
+  | { type: "item"; item: ChatItem; index: number }
+  | { type: "subagents"; items: ToolItem[]; key: string };
+
+function toBlocks(items: ChatItem[]): RenderBlock[] {
+  const blocks: RenderBlock[] = [];
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    if (isSubagentTool(item)) {
+      const last = blocks[blocks.length - 1];
+      if (last?.type === "subagents") {
+        last.items.push(item);
+      } else {
+        blocks.push({ type: "subagents", items: [item], key: item.id });
+      }
+    } else {
+      blocks.push({ type: "item", item, index: i });
+    }
+  }
+  return blocks;
+}
 
 /** 流式期间的状态指示：根据最后一个条目推断 agent 正在干什么 */
 function workingLabel(items: ChatItem[]): string {
@@ -50,7 +80,11 @@ export function ChatView() {
     <div className="chat-view">
       <div className="chat-messages" ref={scrollRef}>
         {items.length === 0 && <Empty description={emptyHint} style={{ marginTop: "20vh" }} />}
-        {items.map((item, index) => {
+        {toBlocks(items).map((block) => {
+          if (block.type === "subagents") {
+            return <SubagentGroup key={block.key} items={block.items} />;
+          }
+          const { item, index } = block;
           if (item.kind === "tool") return <ToolCallCard key={item.id} item={item} />;
           if (item.kind === "approval") return <ApprovalCard key={item.requestId} item={item} />;
           const isLast = index === items.length - 1;

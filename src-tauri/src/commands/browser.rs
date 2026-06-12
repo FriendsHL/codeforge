@@ -65,6 +65,16 @@ pub fn browser_bounds(app: AppHandle, x: f64, y: f64, width: f64, height: f64) -
     Ok(())
 }
 
+/// 历史后退/前进：对子 webview eval（无需返回值）
+#[tauri::command]
+pub fn browser_history(app: AppHandle, forward: bool) -> Result<(), String> {
+    if let Some(webview) = app.get_webview(BROWSER_LABEL) {
+        let js = if forward { "history.forward()" } else { "history.back()" };
+        webview.eval(js).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub fn browser_close(app: AppHandle) -> Result<(), String> {
     if let Some(webview) = app.get_webview(BROWSER_LABEL) {

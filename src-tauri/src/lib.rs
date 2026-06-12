@@ -84,6 +84,7 @@ pub fn run() {
             commands::browser::browser_show,
             commands::browser::browser_bounds,
             commands::browser::browser_close,
+            commands::browser::browser_history,
             commands::mcp::mcp_status,
             commands::mcp::mcp_reload,
             commands::mcp::mcp_config_path,

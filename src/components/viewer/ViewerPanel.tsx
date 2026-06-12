@@ -6,7 +6,9 @@ import {
   DiffOutlined,
   FileTextOutlined,
   GlobalOutlined,
+  LeftOutlined,
   ReloadOutlined,
+  RightOutlined,
 } from "@ant-design/icons";
 import { highlightCode, languageForPath } from "../../lib/highlight";
 import { useViewerStore } from "../../stores/viewerStore";
@@ -37,12 +39,17 @@ function BrowserView({ url }: { url: string }) {
     void invoke("browser_show", { url: target, ...bounds }).catch(() => setUnreachable(true));
   };
 
+  // url 变化（含 agent 的 browser_open）→ 导航
   useEffect(() => {
     setDraft(url);
     setCurrent(url);
-    // 等布局稳定后再挂子 webview
-    const timer = setTimeout(() => show(url), 60);
+    const timer = setTimeout(() => show(url), 60); // 等布局稳定后再挂子 webview
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [url]);
 
+  // 面板生命周期：位置同步 + 卸载时销毁子 webview
+  useEffect(() => {
     const sync = () => {
       const bounds = rect();
       if (bounds) void invoke("browser_bounds", bounds);
@@ -52,12 +59,10 @@ function BrowserView({ url }: { url: string }) {
     window.addEventListener("resize", sync);
 
     return () => {
-      clearTimeout(timer);
       observer.disconnect();
       window.removeEventListener("resize", sync);
-      void invoke("browser_close"); // 面板关闭时移除子 webview
+      void invoke("browser_close");
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const go = (target?: string) => {
@@ -72,6 +77,16 @@ function BrowserView({ url }: { url: string }) {
   return (
     <div className="browser-view">
       <div className="browser-bar">
+        <Button
+          size="small"
+          icon={<LeftOutlined />}
+          onClick={() => void invoke("browser_history", { forward: false })}
+        />
+        <Button
+          size="small"
+          icon={<RightOutlined />}
+          onClick={() => void invoke("browser_history", { forward: true })}
+        />
         <Input
           size="small"
           value={draft}

@@ -53,6 +53,16 @@ function App() {
     };
   }, []);
 
+  // agent 的 browser_open 工具 → 打开浏览器面板并导航
+  useEffect(() => {
+    const unlisten = listen<string>("browser-open", (event) => {
+      useViewerStore.getState().openBrowser(event.payload);
+    });
+    return () => {
+      void unlisten.then((fn) => fn());
+    };
+  }, []);
+
   return (
     <ConfigProvider theme={{ token: { colorPrimary: "#d46b08" } }}>
       <AntdApp>

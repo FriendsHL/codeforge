@@ -18,6 +18,7 @@ pub async fn send_message(
     model: String,
     messages: Vec<ChatMessage>,
     channel: Channel<AgentEvent>,
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     mcp: State<'_, McpState>,
 ) -> Result<(), String> {
@@ -26,9 +27,11 @@ pub async fn send_message(
     let workspace = state.workspace.lock().unwrap().clone();
     let permissions = state.permissions.clone();
 
-    // 内置工具 + 已连接 MCP server 的工具，组装本次请求的注册表
+    // 内置工具 + browser_open（需要 AppHandle）+ 已连接 MCP server 的工具
     let tool_registry = {
         let mut tools = state.tools.all();
+        tools.push(Arc::new(crate::tools::browser::BrowserOpenTool { app: app.clone() })
+            as Arc<dyn crate::tools::registry::Tool>);
         for connection in mcp.manager.lock().unwrap().connections() {
             tools.extend(McpToolAdapter::wrap_all(&connection));
         }

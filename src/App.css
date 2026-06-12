@@ -597,6 +597,46 @@ body.resizing {
   overflow-y: auto;
 }
 
+.subagent-group {
+  align-self: stretch;
+  max-width: 90%;
+  border: 1px solid #e8e8e8;
+  border-radius: 10px;
+  background: #fbfbfb;
+  padding: 6px 10px;
+}
+
+.subagent-running {
+  border-color: #91caff;
+}
+
+.subagent-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #555;
+  cursor: pointer;
+  user-select: none;
+  padding: 2px 0;
+}
+
+.subagent-status {
+  margin-left: auto;
+}
+
+.subagent-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.subagent-body .tool-card {
+  max-width: 100%;
+}
+
 .working-row {
   display: flex;
   align-items: center;
