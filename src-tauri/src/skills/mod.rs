@@ -61,12 +61,16 @@ fn scan_dir(root: &Path, out: &mut Vec<SkillMeta>) {
 }
 
 pub fn discover(workspace: Option<&Path>) -> Vec<SkillMeta> {
+    discover_in(workspace, global_skills_dir().as_deref())
+}
+
+fn discover_in(workspace: Option<&Path>, global: Option<&Path>) -> Vec<SkillMeta> {
     let mut skills = Vec::new();
     if let Some(workspace) = workspace {
         scan_dir(&workspace.join(".codeforge/skills"), &mut skills);
     }
-    if let Some(global) = global_skills_dir() {
-        scan_dir(&global, &mut skills);
+    if let Some(global) = global {
+        scan_dir(global, &mut skills);
     }
     skills.sort_by(|a, b| a.name.cmp(&b.name));
     skills
@@ -121,7 +125,8 @@ mod tests {
         make_skill(dir.path(), "deploy-check", "发布前检查清单");
         make_skill(dir.path(), "api-review", "API 设计评审");
 
-        let skills = discover(Some(dir.path()));
+        // 用隔离的全局目录（None），避免被宿主机 ~/.codeforge/skills 干扰
+        let skills = discover_in(Some(dir.path()), None);
         assert_eq!(skills.len(), 2);
         assert_eq!(skills[0].name, "api-review"); // 按名排序
 
@@ -131,12 +136,22 @@ mod tests {
     }
 
     #[test]
-    fn prompt_section_lists_skills() {
-        let dir = tempfile::tempdir().unwrap();
-        make_skill(dir.path(), "deploy-check", "发布前检查清单");
-        let section = prompt_section(Some(dir.path())).unwrap();
-        assert!(section.contains("- deploy-check: 发布前检查清单"));
-        assert!(prompt_section(Some(tempfile::tempdir().unwrap().path())).is_none());
+    fn workspace_skill_wins_name_clash_over_global() {
+        let workspace = tempfile::tempdir().unwrap();
+        let global = tempfile::tempdir().unwrap();
+        make_skill(workspace.path(), "deploy-check", "项目级");
+        // 全局目录结构没有 .codeforge/skills 前缀，直接放技能目录
+        let global_skill = global.path().join("deploy-check");
+        std::fs::create_dir_all(&global_skill).unwrap();
+        std::fs::write(
+            global_skill.join("SKILL.md"),
+            "---\nname: deploy-check\ndescription: 全局级\n---\nbody",
+        )
+        .unwrap();
+
+        let skills = discover_in(Some(workspace.path()), Some(global.path()));
+        assert_eq!(skills.len(), 1);
+        assert_eq!(skills[0].description, "项目级");
     }
 
     #[test]

@@ -1,6 +1,6 @@
 use tauri::State;
 
-use crate::session::{SessionMeta, SessionStore};
+use crate::session::{ProjectMeta, SessionMeta, SessionStore};
 
 pub struct SessionState(pub SessionStore);
 
@@ -10,9 +10,23 @@ pub fn list_sessions(state: State<'_, SessionState>) -> Result<Vec<SessionMeta>,
 }
 
 #[tauri::command]
-pub fn create_session(title: String, state: State<'_, SessionState>) -> Result<SessionMeta, String> {
+pub fn create_session(
+    title: String,
+    workspace_root: Option<String>,
+    state: State<'_, SessionState>,
+) -> Result<SessionMeta, String> {
     let title = if title.trim().is_empty() { "新会话".to_string() } else { title };
-    state.0.create(&title)
+    state.0.create(&title, workspace_root.as_deref())
+}
+
+#[tauri::command]
+pub fn list_projects(state: State<'_, SessionState>) -> Result<Vec<ProjectMeta>, String> {
+    state.0.list_projects()
+}
+
+#[tauri::command]
+pub fn remove_project(root: String, state: State<'_, SessionState>) -> Result<(), String> {
+    state.0.remove_project(&root)
 }
 
 #[tauri::command]

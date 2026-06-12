@@ -3,7 +3,8 @@ import { listen } from "@tauri-apps/api/event";
 import { App as AntdApp, Button, ConfigProvider, Tag, Tooltip } from "antd";
 import { BranchesOutlined, FolderOpenOutlined, SettingOutlined } from "@ant-design/icons";
 import { ChatView } from "./components/chat/ChatView";
-import { Sidebar } from "./components/sidebar/Sidebar";
+import { ProjectsPanel } from "./components/sidebar/ProjectsPanel";
+import { RightPanel } from "./components/sidebar/RightPanel";
 import { SettingsModal } from "./components/settings/SettingsModal";
 import { hasApiKey } from "./lib/ipc";
 import { useChatStore } from "./stores/chatStore";
@@ -14,7 +15,7 @@ import "./App.css";
 
 function App() {
   const model = useChatStore((s) => s.model);
-  const { name, openWorkspace } = useWorkspaceStore();
+  const { root, name } = useWorkspaceStore();
   const branch = useGitStore((s) => s.branch);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
@@ -48,13 +49,7 @@ function App() {
           <header className="app-header">
             <span className="app-title">⚒️ CodeForge</span>
             <Tag color="orange">{model}</Tag>
-            <Button
-              icon={<FolderOpenOutlined />}
-              size="small"
-              onClick={() => void openWorkspace()}
-            >
-              {name ?? "打开项目"}
-            </Button>
+            {name && <Tag icon={<FolderOpenOutlined />}>{name}</Tag>}
             {branch && (
               <Tag icon={<BranchesOutlined />} color="geekblue">
                 {branch}
@@ -70,8 +65,10 @@ function App() {
             </Tooltip>
           </header>
           <div className="app-body">
-            <Sidebar />
+            <ProjectsPanel />
             <ChatView />
+            {/* 预留：浏览器面板将插在 ChatView 和 RightPanel 之间，可折叠 */}
+            {root && <RightPanel />}
           </div>
           <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
         </div>

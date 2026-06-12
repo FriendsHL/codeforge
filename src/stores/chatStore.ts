@@ -95,10 +95,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const { items, model, streaming } = get();
     if (streaming || !text.trim()) return;
 
-    // 首条消息时落库建会话（标题取消息前 24 字）
+    // 首条消息时落库建会话（标题取消息前 24 字，归属当前项目）
     if (get().currentSessionId === null) {
       try {
-        const meta = await createSession(text.trim().slice(0, 24));
+        const { useWorkspaceStore } = await import("./workspaceStore");
+        const meta = await createSession(
+          text.trim().slice(0, 24),
+          useWorkspaceStore.getState().root,
+        );
         set({ currentSessionId: meta.id });
         void useSessionStore.getState().refresh();
       } catch (e) {

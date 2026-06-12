@@ -76,12 +76,22 @@ export interface SessionMeta {
   id: number;
   title: string;
   updatedAt: string;
+  workspaceRoot: string | null;
+}
+
+export interface ProjectMeta {
+  root: string;
+  name: string;
 }
 
 export const listSessions = () => invoke<SessionMeta[]>("list_sessions");
 
-export const createSession = (title: string) =>
-  invoke<SessionMeta>("create_session", { title });
+export const createSession = (title: string, workspaceRoot: string | null) =>
+  invoke<SessionMeta>("create_session", { title, workspaceRoot });
+
+export const listProjects = () => invoke<ProjectMeta[]>("list_projects");
+
+export const removeProject = (root: string) => invoke<void>("remove_project", { root });
 
 export const renameSession = (id: number, title: string) =>
   invoke<void>("rename_session", { id, title });

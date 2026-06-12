@@ -13,6 +13,15 @@ pub struct SessionMeta {
     pub id: i64,
     pub title: String,
     pub updated_at: String,
+    /// 会话所属的项目根目录（纯聊天会话为 None）
+    pub workspace_root: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectMeta {
+    pub root: String,
+    pub name: String,
 }
 
 pub struct SessionStore {
@@ -29,16 +38,25 @@ impl SessionStore {
                 items TEXT NOT NULL DEFAULT '[]',
                 created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
                 updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+            );
+            CREATE TABLE IF NOT EXISTS projects (
+                root TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                last_opened_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
             );",
         )
         .map_err(|e| format!("初始化表失败: {e}"))?;
+        // v1.2 迁移：会话关联项目（列已存在时报错可忽略）
+        let _ = conn.execute("ALTER TABLE sessions ADD COLUMN workspace_root TEXT", []);
         Ok(Self { conn: Mutex::new(conn) })
     }
 
     pub fn list(&self) -> Result<Vec<SessionMeta>, String> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
-            .prepare("SELECT id, title, updated_at FROM sessions ORDER BY updated_at DESC")
+            .prepare(
+                "SELECT id, title, updated_at, workspace_root FROM sessions ORDER BY updated_at DESC",
+            )
             .map_err(|e| e.to_string())?;
         let rows = stmt
             .query_map([], |row| {
@@ -46,21 +64,66 @@ impl SessionStore {
                     id: row.get(0)?,
                     title: row.get(1)?,
                     updated_at: row.get(2)?,
+                    workspace_root: row.get(3)?,
                 })
             })
             .map_err(|e| e.to_string())?;
         rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
     }
 
-    pub fn create(&self, title: &str) -> Result<SessionMeta, String> {
+    pub fn create(&self, title: &str, workspace_root: Option<&str>) -> Result<SessionMeta, String> {
         let conn = self.conn.lock().unwrap();
-        conn.execute("INSERT INTO sessions (title) VALUES (?1)", [title])
-            .map_err(|e| e.to_string())?;
+        conn.execute(
+            "INSERT INTO sessions (title, workspace_root) VALUES (?1, ?2)",
+            rusqlite::params![title, workspace_root],
+        )
+        .map_err(|e| e.to_string())?;
         let id = conn.last_insert_rowid();
         let updated_at: String = conn
             .query_row("SELECT updated_at FROM sessions WHERE id = ?1", [id], |r| r.get(0))
             .map_err(|e| e.to_string())?;
-        Ok(SessionMeta { id, title: title.to_string(), updated_at })
+        Ok(SessionMeta {
+            id,
+            title: title.to_string(),
+            updated_at,
+            workspace_root: workspace_root.map(String::from),
+        })
+    }
+
+    /// 记录/刷新最近打开的项目
+    pub fn upsert_project(&self, root: &str, name: &str) -> Result<(), String> {
+        self.conn
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO projects (root, name) VALUES (?1, ?2)
+                 ON CONFLICT(root) DO UPDATE SET last_opened_at = datetime('now', 'localtime')",
+                rusqlite::params![root, name],
+            )
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub fn list_projects(&self) -> Result<Vec<ProjectMeta>, String> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare("SELECT root, name FROM projects ORDER BY last_opened_at DESC")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(ProjectMeta { root: row.get(0)?, name: row.get(1)? })
+            })
+            .map_err(|e| e.to_string())?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    }
+
+    pub fn remove_project(&self, root: &str) -> Result<(), String> {
+        self.conn
+            .lock()
+            .unwrap()
+            .execute("DELETE FROM projects WHERE root = ?1", [root])
+            .map_err(|e| e.to_string())?;
+        Ok(())
     }
 
     pub fn rename(&self, id: i64, title: &str) -> Result<(), String> {
@@ -121,9 +184,13 @@ mod tests {
     #[test]
     fn create_list_rename_delete() {
         let (_dir, store) = store();
-        let a = store.create("会话 A").unwrap();
-        let _b = store.create("会话 B").unwrap();
-        assert_eq!(store.list().unwrap().len(), 2);
+        let a = store.create("会话 A", Some("/tmp/proj")).unwrap();
+        let _b = store.create("会话 B", None).unwrap();
+        let listed = store.list().unwrap();
+        assert_eq!(listed.len(), 2);
+        assert!(listed
+            .iter()
+            .any(|s| s.workspace_root.as_deref() == Some("/tmp/proj")));
 
         store.rename(a.id, "改名了").unwrap();
         assert!(store.list().unwrap().iter().any(|s| s.title == "改名了"));
@@ -135,7 +202,7 @@ mod tests {
     #[test]
     fn save_and_load_items_roundtrip() {
         let (_dir, store) = store();
-        let s = store.create("t").unwrap();
+        let s = store.create("t", None).unwrap();
         let items = r#"[{"kind":"msg","role":"user","content":"你好"}]"#;
         store.save_items(s.id, items).unwrap();
         assert_eq!(store.load_items(s.id).unwrap(), items);
@@ -144,8 +211,20 @@ mod tests {
     #[test]
     fn save_rejects_invalid_json() {
         let (_dir, store) = store();
-        let s = store.create("t").unwrap();
+        let s = store.create("t", None).unwrap();
         assert!(store.save_items(s.id, "not json").is_err());
         assert!(store.save_items(s.id, r#"{"kind":"msg"}"#).is_err());
+    }
+
+    #[test]
+    fn projects_upsert_and_list() {
+        let (_dir, store) = store();
+        store.upsert_project("/a", "a").unwrap();
+        store.upsert_project("/b", "b").unwrap();
+        store.upsert_project("/a", "a").unwrap(); // 重开 → 刷新时间，不重复
+        let projects = store.list_projects().unwrap();
+        assert_eq!(projects.len(), 2);
+        store.remove_project("/a").unwrap();
+        assert_eq!(store.list_projects().unwrap().len(), 1);
     }
 }

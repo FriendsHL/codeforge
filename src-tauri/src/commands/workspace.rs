@@ -38,6 +38,7 @@ pub fn set_workspace(
     path: String,
     app: AppHandle,
     state: State<'_, AppState>,
+    sessions: State<'_, crate::commands::session::SessionState>,
 ) -> Result<WorkspaceInfo, String> {
     let canonical = PathBuf::from(&path)
         .canonicalize()
@@ -52,6 +53,7 @@ pub fn set_workspace(
     let info = WorkspaceInfo { root: canonical.display().to_string(), name };
     *state.workspace.lock().unwrap() = Some(canonical.clone());
     state.permissions.reset(); // 换项目后重置"全部允许"
+    sessions.0.upsert_project(&info.root, &info.name)?; // 记入最近项目
     start_watcher(&canonical, app, &state)?;
     Ok(info)
 }
