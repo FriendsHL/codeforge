@@ -4,6 +4,7 @@
 
 use crate::config;
 
+#[derive(Clone, Copy)]
 pub enum Endpoint {
     /// Anthropic Messages API，key 存 macOS Keychain
     Anthropic,

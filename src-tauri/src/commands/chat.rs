@@ -4,7 +4,7 @@ use tauri::ipc::Channel;
 use tauri::State;
 
 use crate::agent::events::AgentEvent;
-use crate::agent::loop_::run_agent_loop;
+use crate::agent::loop_::{run_agent_loop, AgentCtx};
 use crate::commands::mcp::McpState;
 use crate::llm::registry;
 use crate::llm::types::{ChatMessage, HistoryItem};
@@ -50,17 +50,15 @@ pub async fn send_message(
         let _ = channel.send(event);
     };
 
-    let result = run_agent_loop(
-        &endpoint,
-        &api_key,
-        &model,
-        history,
-        tool_registry,
+    let ctx = AgentCtx {
+        endpoint,
+        api_key,
+        model,
+        registry: tool_registry,
         workspace,
         permissions,
-        &on_event,
-    )
-    .await;
+    };
+    let result = run_agent_loop(&ctx, history, &on_event).await;
 
     if let Err(message) = &result {
         on_event(AgentEvent::Error { message: message.clone() });

@@ -1,7 +1,12 @@
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { App as AntdApp, Button, ConfigProvider, Tag, Tooltip } from "antd";
-import { BranchesOutlined, FolderOpenOutlined, SettingOutlined } from "@ant-design/icons";
+import {
+  BranchesOutlined,
+  FolderOpenOutlined,
+  GlobalOutlined,
+  SettingOutlined,
+} from "@ant-design/icons";
 import { ChatView } from "./components/chat/ChatView";
 import { ProjectsPanel } from "./components/sidebar/ProjectsPanel";
 import { RightPanel } from "./components/sidebar/RightPanel";
@@ -11,6 +16,7 @@ import { hasApiKey } from "./lib/ipc";
 import { useChatStore } from "./stores/chatStore";
 import { useGitStore } from "./stores/gitStore";
 import { useSessionStore } from "./stores/sessionStore";
+import { useViewerStore } from "./stores/viewerStore";
 import { useWorkspaceStore } from "./stores/workspaceStore";
 import "./App.css";
 
@@ -57,6 +63,17 @@ function App() {
               </Tag>
             )}
             <div className="app-header-spacer" />
+            <Tooltip title="浏览器面板（预览本地 dev server）">
+              <Button
+                type="text"
+                icon={<GlobalOutlined />}
+                onClick={() => {
+                  const { content, openBrowser, close } = useViewerStore.getState();
+                  if (content?.type === "browser") close();
+                  else openBrowser();
+                }}
+              />
+            </Tooltip>
             <Tooltip title="设置">
               <Button
                 type="text"

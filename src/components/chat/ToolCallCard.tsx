@@ -20,6 +20,7 @@ const TOOL_LABELS: Record<string, string> = {
   web_fetch: "抓网页",
   web_search: "搜索",
   load_skill: "加载技能",
+  spawn_subagents: "子agent团队",
 };
 
 function summarizeInput(name: string, input: unknown): string {
@@ -44,6 +45,10 @@ function summarizeInput(name: string, input: unknown): string {
       return String(obj.query ?? "");
     case "load_skill":
       return String(obj.name ?? "");
+    case "spawn_subagents": {
+      const tasks = obj.tasks as { title?: string }[] | undefined;
+      return (tasks ?? []).map((t) => t.title).filter(Boolean).join(" | ");
+    }
     case "git_status":
       return "";
     case "git_diff":

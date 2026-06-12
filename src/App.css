@@ -151,6 +151,32 @@ body {
   border: none;
 }
 
+.browser-view {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.browser-bar {
+  display: flex;
+  gap: 6px;
+  padding: 6px 8px;
+  border-bottom: 1px solid #f5f5f5;
+}
+
+.browser-frame {
+  flex: 1;
+  border: none;
+  background: #fff;
+}
+
+.browser-hint {
+  font-size: 11px;
+  color: #bbb;
+  padding: 3px 8px;
+  border-top: 1px solid #f5f5f5;
+}
+
 .viewer-code {
   margin: 0;
   font-size: 12.5px;

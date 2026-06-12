@@ -2,8 +2,17 @@
 
 use std::path::Path;
 
-pub fn build_system_prompt(workspace: Option<&Path>) -> String {
+pub fn build_system_prompt(workspace: Option<&Path>, is_subagent: bool) -> String {
     let mut sections: Vec<String> = Vec::new();
+
+    if is_subagent {
+        sections.push(
+            "\
+你是主 agent 派出的子 agent。专注完成交给你的单一任务；主 agent 看不到你的执行过程，
+只能看到你的最终回答——所以最终回答必须是一份完整、客观、自包含的汇报（含关键证据和文件:行号引用）。"
+                .into(),
+        );
+    }
 
     sections.push(
         "\
@@ -28,7 +37,8 @@ pub fn build_system_prompt(workspace: Option<&Path>) -> String {
 - 基于读到的真实代码回答，不要编造没有看过的内容；证据不足时直说。
 - 修改代码：局部改动用 edit_file（old_string 需逐字符精确匹配），新建文件或整文件重写用 write_file。改前先 read_file 确认现状；每次改动会以 diff 形式请用户审批，被拒绝时先弄清用户意图再调整方案。
 - 执行命令用 bash（跑测试、构建、安装依赖等），同样需用户审批。改完代码主动跑相关测试验证，失败就根据输出继续修，直到通过。避免无关的全局安装和网络下载。
-- 遇到不熟悉的库 API、报错信息或需要最新文档时，用 web_search 搜索、web_fetch 阅读具体页面；优先官方文档。"
+- 遇到不熟悉的库 API、报错信息或需要最新文档时，用 web_search 搜索、web_fetch 阅读具体页面；优先官方文档。
+- 多个互相独立的大块子任务（并行探索代码库不同模块、批量调查）可用 spawn_subagents 并行派发，避免串行干和上下文爆炸；连续依赖的步骤不要拆给子 agent。"
                 .into(),
         );
 

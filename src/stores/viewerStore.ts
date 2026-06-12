@@ -3,12 +3,14 @@ import { gitFileDiff, readFilePreview } from "../lib/ipc";
 
 export type ViewerContent =
   | { type: "file"; path: string; content: string; truncated: boolean }
-  | { type: "diff"; path: string; diff: string };
+  | { type: "diff"; path: string; diff: string }
+  | { type: "browser"; url: string };
 
 interface ViewerState {
   content: ViewerContent | null;
   openFile: (path: string) => Promise<void>;
   openDiff: (path: string) => Promise<void>;
+  openBrowser: (url?: string) => void;
   close: () => void;
 }
 
@@ -25,6 +27,14 @@ export const useViewerStore = create<ViewerState>((set) => ({
     const diff = await gitFileDiff(path);
     set({ content: { type: "diff", path, diff } });
   },
+
+  openBrowser: (url) =>
+    set({
+      content: {
+        type: "browser",
+        url: url ?? localStorage.getItem("codeforge.browser.url") ?? "http://localhost:3000",
+      },
+    }),
 
   close: () => set({ content: null }),
 }));
