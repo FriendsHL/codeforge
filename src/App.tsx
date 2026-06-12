@@ -8,6 +8,7 @@ import {
   SettingOutlined,
 } from "@ant-design/icons";
 import { ChatView } from "./components/chat/ChatView";
+import { ResizeHandle } from "./components/layout/ResizeHandle";
 import { ProjectsPanel } from "./components/sidebar/ProjectsPanel";
 import { RightPanel } from "./components/sidebar/RightPanel";
 import { SettingsModal } from "./components/settings/SettingsModal";
@@ -16,6 +17,7 @@ import { hasApiKey } from "./lib/ipc";
 import { useChatStore } from "./stores/chatStore";
 import { useGitStore } from "./stores/gitStore";
 import { useSessionStore } from "./stores/sessionStore";
+import { useUiStore } from "./stores/uiStore";
 import { useViewerStore } from "./stores/viewerStore";
 import { useWorkspaceStore } from "./stores/workspaceStore";
 import "./App.css";
@@ -24,6 +26,8 @@ function App() {
   const model = useChatStore((s) => s.model);
   const { root, name } = useWorkspaceStore();
   const branch = useGitStore((s) => s.branch);
+  const viewerOpen = useViewerStore((s) => s.content !== null);
+  const { widths, resize } = useUiStore();
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   // 启动时加载历史会话列表
@@ -83,11 +87,27 @@ function App() {
             </Tooltip>
           </header>
           <div className="app-body">
-            <ProjectsPanel />
+            <div style={{ width: widths.left, flexShrink: 0, display: "flex" }}>
+              <ProjectsPanel />
+            </div>
+            <ResizeHandle onDelta={(dx) => resize("left", dx, true)} />
             <ChatView />
-            {/* 文件/diff 查看器（将来浏览器面板也在这个位置） */}
-            <ViewerPanel />
-            {root && <RightPanel />}
+            {viewerOpen && (
+              <>
+                <ResizeHandle onDelta={(dx) => resize("viewer", dx, false)} />
+                <div style={{ width: widths.viewer, flexShrink: 0, display: "flex" }}>
+                  <ViewerPanel />
+                </div>
+              </>
+            )}
+            {root && (
+              <>
+                <ResizeHandle onDelta={(dx) => resize("right", dx, false)} />
+                <div style={{ width: widths.right, flexShrink: 0, display: "flex" }}>
+                  <RightPanel />
+                </div>
+              </>
+            )}
           </div>
           <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
         </div>
