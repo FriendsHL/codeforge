@@ -205,7 +205,7 @@ body.resizing {
 .browser-frame {
   flex: 1;
   border: none;
-  background: #fff;
+  background: #f5f5f5; /* 子 webview 加载前的底色 */
 }
 
 .browser-hint {

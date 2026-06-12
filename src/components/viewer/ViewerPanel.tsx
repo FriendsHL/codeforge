@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Alert, Button, Input, Tag, Typography } from "antd";
 import {
@@ -18,30 +18,55 @@ function normalizeUrl(input: string): string {
   return /^https?:\/\//.test(trimmed) ? trimmed : `http://${trimmed}`;
 }
 
+/** 原生子 WebView 浏览器：占位 div 量尺寸，Rust 端把真 WebView 叠在这块区域上 */
 function BrowserView({ url }: { url: string }) {
   const [draft, setDraft] = useState(url);
   const [current, setCurrent] = useState(url);
-  const [reloadKey, setReloadKey] = useState(0);
   const [unreachable, setUnreachable] = useState(false);
+  const holderRef = useRef<HTMLDivElement>(null);
 
-  const probe = (target: string) => {
+  const rect = () => {
+    const r = holderRef.current?.getBoundingClientRect();
+    return r ? { x: r.x, y: r.y, width: r.width, height: r.height } : null;
+  };
+
+  const show = (target: string) => {
+    const bounds = rect();
+    if (!bounds) return;
     void invoke<boolean>("probe_url", { url: target }).then((ok) => setUnreachable(!ok));
+    void invoke("browser_show", { url: target, ...bounds }).catch(() => setUnreachable(true));
   };
 
   useEffect(() => {
     setDraft(url);
     setCurrent(url);
-    probe(url);
-  }, [url]);
+    // 等布局稳定后再挂子 webview
+    const timer = setTimeout(() => show(url), 60);
+
+    const sync = () => {
+      const bounds = rect();
+      if (bounds) void invoke("browser_bounds", bounds);
+    };
+    const observer = new ResizeObserver(sync);
+    if (holderRef.current) observer.observe(holderRef.current);
+    window.addEventListener("resize", sync);
+
+    return () => {
+      clearTimeout(timer);
+      observer.disconnect();
+      window.removeEventListener("resize", sync);
+      void invoke("browser_close"); // 面板关闭时移除子 webview
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const go = (target?: string) => {
     const next = normalizeUrl(target ?? draft);
     if (!next) return;
     setDraft(next);
     setCurrent(next);
-    setReloadKey((k) => k + 1);
     localStorage.setItem("codeforge.browser.url", next);
-    probe(next);
+    show(next);
   };
 
   return (
@@ -67,15 +92,9 @@ function BrowserView({ url }: { url: string }) {
           message={`连不上 ${current} —— 请确认服务已启动，再点刷新`}
         />
       )}
-      <iframe
-        key={`${current}-${reloadKey}`}
-        src={current}
-        className="browser-frame"
-        title="browser"
-        sandbox="allow-scripts allow-same-origin allow-forms"
-      />
+      <div ref={holderRef} className="browser-frame" />
       <div className="browser-hint">
-        适合预览本地 dev server；部分外部网站（设置了 X-Frame-Options）会拒绝内嵌显示。
+        原生 WebView 渲染，不受 X-Frame-Options 限制；外部网站也可以打开。
       </div>
     </div>
   );
