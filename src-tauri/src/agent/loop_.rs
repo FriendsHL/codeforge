@@ -32,6 +32,10 @@ pub struct AgentCtx {
     pub permissions: Arc<PermissionManager>,
     /// 停止按钮：置 true 后流式读取、loop 迭代、子 agent 都会尽快收尾
     pub cancel: Arc<std::sync::atomic::AtomicBool>,
+    /// provider id（trace 的 gen_ai.system 属性）
+    pub provider: String,
+    /// 本地 OTel trace 写入器（无 session 时为 None）
+    pub trace: Option<Arc<crate::trace::TraceWriter>>,
 }
 
 fn is_cancelled(ctx: &AgentCtx) -> bool {
@@ -46,9 +50,17 @@ pub async fn run_agent_loop(
     history: Vec<HistoryItem>,
     on_event: &EventSink<'_>,
 ) -> Result<(), String> {
-    loop_impl(ctx, history, on_event, String::new(), true)
+    loop_impl(ctx, history, on_event, String::new(), true, None)
         .await
         .map(|_| ())
+}
+
+fn cap_chars(text: &str, limit: usize) -> String {
+    if text.chars().count() <= limit {
+        text.to_string()
+    } else {
+        format!("{}…[+{}字符]", text.chars().take(limit).collect::<String>(), text.chars().count() - limit)
+    }
 }
 
 fn subagent_spec() -> ToolSpec {
@@ -80,12 +92,47 @@ fn subagent_spec() -> ToolSpec {
 /// 递归（子 agent 复用同一循环）需要 Box::pin。
 fn loop_impl<'a>(
     ctx: &'a AgentCtx,
-    mut history: Vec<HistoryItem>,
+    history: Vec<HistoryItem>,
     on_event: &'a EventSink<'a>,
     id_prefix: String,
     is_main: bool,
+    trace_parent: Option<String>,
 ) -> Pin<Box<dyn Future<Output = Result<String, String>> + Send + 'a>> {
     Box::pin(async move {
+        // run 级 span：先预留 id 给子 span 引用，结束时落盘
+        let run_start = crate::trace::now_unix_nanos();
+        let run_span = ctx.trace.as_ref().map(|t| t.reserve_span_id());
+
+        let result = loop_body(ctx, history, on_event, &id_prefix, is_main, run_span.as_deref()).await;
+
+        if let (Some(tracer), Some(span_id)) = (&ctx.trace, &run_span) {
+            tracer.emit(
+                span_id,
+                if is_main { "agent.run" } else { "agent.subagent.run" },
+                trace_parent.as_deref(),
+                run_start,
+                crate::trace::now_unix_nanos(),
+                json!({
+                    "gen_ai.system": ctx.provider,
+                    "gen_ai.request.model": ctx.model,
+                    "codeforge.is_subagent": !is_main,
+                }),
+                result.as_ref().err().map(|e| e.as_str()),
+            );
+        }
+        result
+    })
+}
+
+async fn loop_body(
+    ctx: &AgentCtx,
+    mut history: Vec<HistoryItem>,
+    on_event: &EventSink<'_>,
+    id_prefix: &str,
+    is_main: bool,
+    run_span: Option<&str>,
+) -> Result<String, String> {
+    {
         let system = prompt::build_system_prompt(ctx.workspace.as_deref(), !is_main);
         let mut tools = ctx.registry.specs(ctx.workspace.is_some());
         if is_main {
@@ -94,17 +141,58 @@ fn loop_impl<'a>(
 
         let mut final_text = String::new();
 
-        for _ in 0..MAX_ITERATIONS {
+        for iteration in 0..MAX_ITERATIONS {
+            // 轮内压缩：把超出预算的旧工具结果替换为占位（保留"读过什么"的索引）
+            if iteration > 0 {
+                let pruned = prune_tool_results(&mut history);
+                if pruned > 0 && is_main {
+                    on_event(AgentEvent::ContextCompacted {
+                        note: format!("已清理 {pruned} 个较早的工具结果原文（超出轮内预算）"),
+                    });
+                }
+            }
             if is_cancelled(ctx) {
                 if is_main {
-                    on_event(AgentEvent::TurnEnd { stop_reason: Some("cancelled".into()), output_tokens: None });
+                    on_event(AgentEvent::TurnEnd { stop_reason: Some("cancelled".into()), input_tokens: None, output_tokens: None });
                 }
                 return Ok(final_text);
             }
-            let turn = match call_llm(ctx, &system, &history, &tools, on_event).await {
+            let llm_start = crate::trace::now_unix_nanos();
+            let call_result = call_llm(ctx, &system, &history, &tools, on_event).await;
+            if let Some(tracer) = &ctx.trace {
+                match &call_result {
+                    Ok(turn) => {
+                        tracer.span(
+                            &format!("chat {}", ctx.model),
+                            run_span,
+                            llm_start,
+                            json!({
+                                "gen_ai.system": ctx.provider,
+                                "gen_ai.request.model": ctx.model,
+                                "gen_ai.usage.input_tokens": turn.input_tokens,
+                                "gen_ai.usage.output_tokens": turn.output_tokens,
+                                "gen_ai.response.finish_reasons": [turn.stop_reason.clone()],
+                                "codeforge.tool_call_count": turn.tool_calls.len(),
+                            }),
+                            None,
+                        );
+                    }
+                    Err(e) if e == crate::llm::types::CANCELLED_ERR => {}
+                    Err(e) => {
+                        tracer.span(
+                            &format!("chat {}", ctx.model),
+                            run_span,
+                            llm_start,
+                            json!({"gen_ai.system": ctx.provider, "gen_ai.request.model": ctx.model}),
+                            Some(e),
+                        );
+                    }
+                }
+            }
+            let turn = match call_result {
                 Err(e) if e == crate::llm::types::CANCELLED_ERR => {
                     if is_main {
-                        on_event(AgentEvent::TurnEnd { stop_reason: Some("cancelled".into()), output_tokens: None });
+                        on_event(AgentEvent::TurnEnd { stop_reason: Some("cancelled".into()), input_tokens: None, output_tokens: None });
                     }
                     return Ok(final_text);
                 }
@@ -118,6 +206,7 @@ fn loop_impl<'a>(
                 final_text.push_str(&turn.text);
             }
             let stop_reason = turn.stop_reason.clone();
+            let input_tokens = turn.input_tokens;
             let output_tokens = turn.output_tokens;
             let tool_calls = turn.tool_calls.clone();
 
@@ -127,14 +216,14 @@ fn loop_impl<'a>(
             });
 
             if tool_calls.is_empty() {
-                on_event(AgentEvent::TurnEnd { stop_reason, output_tokens });
+                on_event(AgentEvent::TurnEnd { stop_reason, input_tokens, output_tokens });
                 return Ok(final_text);
             }
 
             for call in tool_calls {
                 if is_cancelled(ctx) {
                     if is_main {
-                        on_event(AgentEvent::TurnEnd { stop_reason: Some("cancelled".into()), output_tokens: None });
+                        on_event(AgentEvent::TurnEnd { stop_reason: Some("cancelled".into()), input_tokens: None, output_tokens: None });
                     }
                     return Ok(final_text);
                 }
@@ -148,19 +237,36 @@ fn loop_impl<'a>(
                 });
 
                 let started = std::time::Instant::now();
+                let tool_start = crate::trace::now_unix_nanos();
                 let result = if call.name == SUBAGENT_TOOL {
                     if is_main {
-                        run_subagents(ctx, &input, on_event, &event_id).await
+                        run_subagents(ctx, &input, on_event, &event_id, run_span).await
                     } else {
                         Err("子 agent 不允许再派发子 agent".into())
                     }
                 } else {
-                    execute_tool(ctx, &event_id, &call.name, input, on_event).await
+                    execute_tool(ctx, &event_id, &call.name, input.clone(), on_event).await
                 };
                 let (content, is_error) = match result {
                     Ok(content) => (content, false),
                     Err(message) => (message, true),
                 };
+
+                if let Some(tracer) = &ctx.trace {
+                    tracer.span(
+                        &format!("tool {}", call.name),
+                        run_span,
+                        tool_start,
+                        json!({
+                            "gen_ai.tool.name": call.name,
+                            "gen_ai.tool.call.id": event_id,
+                            "codeforge.tool.input": cap_chars(&call.arguments, 2000),
+                            "codeforge.tool.output": cap_chars(&content, 8000),
+                            "codeforge.tool.output_chars": content.chars().count(),
+                        }),
+                        is_error.then_some(content.as_str()).map(|_| "tool error").or(None),
+                    );
+                }
 
                 on_event(AgentEvent::ToolCallEnd {
                     id: event_id,
@@ -178,7 +284,7 @@ fn loop_impl<'a>(
         }
 
         Err(format!("达到最大迭代次数（{MAX_ITERATIONS}），任务可能过于复杂，请拆小后重试"))
-    })
+    }
 }
 
 /// 并行运行子 agent，汇总各自的书面汇报
@@ -187,6 +293,7 @@ async fn run_subagents<'a>(
     input: &Value,
     on_event: &'a EventSink<'a>,
     parent_id: &str,
+    trace_parent: Option<&str>,
 ) -> Result<String, String> {
     let tasks = input["tasks"].as_array().ok_or("缺少 tasks 参数")?;
     if tasks.is_empty() || tasks.len() > MAX_SUBAGENTS {
@@ -218,6 +325,7 @@ async fn run_subagents<'a>(
             &quiet,
             format!("{parent_id}-s{index}-"),
             false,
+            trace_parent.map(str::to_string),
         )
     });
     let results = futures_util::future::join_all(futures).await;
@@ -331,6 +439,33 @@ async fn execute_tool(
     handle.await.map_err(|e| format!("工具执行崩溃: {e}"))?
 }
 
+/// 轮内工具结果预算：从最新往回数，超出后旧结果原文替换为占位。
+/// 返回本次清理的条数。
+const TOOL_RESULT_BUDGET_CHARS: usize = 60_000;
+const PRUNED_MARK: &str = "[已清理]";
+
+fn prune_tool_results(history: &mut [HistoryItem]) -> usize {
+    let mut used = 0usize;
+    let mut pruned = 0usize;
+    for item in history.iter_mut().rev() {
+        if let HistoryItem::ToolResult { content, name, .. } = item {
+            if content.starts_with(PRUNED_MARK) {
+                continue;
+            }
+            let len = content.chars().count();
+            if used + len > TOOL_RESULT_BUDGET_CHARS {
+                *content = format!(
+                    "{PRUNED_MARK} {name} 的输出（{len} 字符）已超出上下文预算被移除；如仍需要请重新调用该工具"
+                );
+                pruned += 1;
+            } else {
+                used += len;
+            }
+        }
+    }
+    pruned
+}
+
 fn preview(content: &str) -> String {
     if content.chars().count() <= EVENT_OUTPUT_PREVIEW_CHARS {
         content.to_string()
@@ -356,7 +491,44 @@ mod tests {
             workspace,
             permissions: Arc::new(PermissionManager::default()),
             cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            provider: "ark".into(),
+            trace: None,
         }
+    }
+
+    #[test]
+    fn prunes_old_tool_results_over_budget() {
+        let big = "x".repeat(TOOL_RESULT_BUDGET_CHARS);
+        let mut history = vec![
+            HistoryItem::User("q".into()),
+            HistoryItem::ToolResult {
+                call_id: "c1".into(),
+                name: "read_file".into(),
+                content: "旧结果".repeat(100),
+                is_error: false,
+            },
+            HistoryItem::ToolResult {
+                call_id: "c2".into(),
+                name: "grep".into(),
+                content: big.clone(),
+                is_error: false,
+            },
+        ];
+        let pruned = prune_tool_results(&mut history);
+        assert_eq!(pruned, 1, "旧的应被清理，新的（占满预算）保留");
+        match &history[1] {
+            HistoryItem::ToolResult { content, .. } => {
+                assert!(content.starts_with(PRUNED_MARK));
+                assert!(content.contains("read_file"));
+            }
+            _ => panic!(),
+        }
+        match &history[2] {
+            HistoryItem::ToolResult { content, .. } => assert_eq!(content, &big),
+            _ => panic!(),
+        }
+        // 幂等：再跑不重复清理
+        assert_eq!(prune_tool_results(&mut history), 0);
     }
 
     /// 真实 API 集成测试：cargo test live_agent_loop -- --ignored --nocapture

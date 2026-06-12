@@ -9,6 +9,7 @@ mod security;
 mod session;
 mod skills;
 mod tools;
+mod trace;
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};

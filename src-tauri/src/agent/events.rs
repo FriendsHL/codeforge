@@ -33,8 +33,12 @@ pub enum AgentEvent {
     #[serde(rename_all = "camelCase")]
     TurnEnd {
         stop_reason: Option<String>,
+        input_tokens: Option<u64>,
         output_tokens: Option<u64>,
     },
+    /// 上下文压缩发生时的提示（前端显示为系统注记）
+    #[serde(rename_all = "camelCase")]
+    ContextCompacted { note: String },
     #[serde(rename_all = "camelCase")]
     Error { message: String },
 }

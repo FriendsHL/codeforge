@@ -12,7 +12,13 @@ export type AgentEvent =
   | { type: "toolCallEnd"; id: string; output: string; isError: boolean; durationMs: number }
   | { type: "permissionAsk"; requestId: string; toolName: string; summary: string; diff: string }
   | { type: "commandOutput"; id: string; chunk: string }
-  | { type: "turnEnd"; stopReason: string | null; outputTokens: number | null }
+  | {
+      type: "turnEnd";
+      stopReason: string | null;
+      inputTokens: number | null;
+      outputTokens: number | null;
+    }
+  | { type: "contextCompacted"; note: string }
   | { type: "error"; message: string };
 
 export interface WorkspaceInfo {
@@ -35,11 +41,12 @@ export async function sendMessage(
   provider: string,
   model: string,
   messages: ChatMessage[],
+  sessionId: number | null,
   onEvent: (event: AgentEvent) => void,
 ): Promise<void> {
   const channel = new Channel<AgentEvent>();
   channel.onmessage = onEvent;
-  await invoke("send_message", { provider, model, messages, channel });
+  await invoke("send_message", { provider, model, messages, sessionId, channel });
 }
 
 export const setApiKey = (key: string) => invoke<void>("set_api_key", { key });

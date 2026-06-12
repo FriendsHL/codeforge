@@ -51,7 +51,8 @@ function workingLabel(items: ChatItem[]): string {
 }
 
 export function ChatView() {
-  const { items, streaming, error, send, clear, terminalOpen, sessionTokens } = useChatStore();
+  const { items, streaming, error, send, clear, terminalOpen, sessionTokens, contextTokens } =
+    useChatStore();
   const workspaceName = useWorkspaceStore((s) => s.name);
   const { message } = App.useApp();
   const [draft, setDraft] = useState("");
@@ -87,6 +88,13 @@ export function ChatView() {
           const { item, index } = block;
           if (item.kind === "tool") return <ToolCallCard key={item.id} item={item} />;
           if (item.kind === "approval") return <ApprovalCard key={item.requestId} item={item} />;
+          if (item.kind === "notice") {
+            return (
+              <div key={index} className="chat-notice">
+                {item.text}
+              </div>
+            );
+          }
           const isLast = index === items.length - 1;
           const reasoningLive =
             streaming && isLast && item.role === "assistant" && !item.content;
@@ -120,8 +128,11 @@ export function ChatView() {
 
       {terminalOpen && <TerminalPanel />}
 
-      {sessionTokens > 0 && (
-        <div className="chat-status">本会话累计输出 {sessionTokens.toLocaleString()} tokens</div>
+      {(sessionTokens > 0 || contextTokens !== null) && (
+        <div className="chat-status">
+          {contextTokens !== null && `当前上下文 ${contextTokens.toLocaleString()} tokens · `}
+          本会话累计输出 {sessionTokens.toLocaleString()} tokens
+        </div>
       )}
 
       <div className="chat-input">

@@ -24,7 +24,21 @@ struct SseData {
     #[serde(default)]
     usage: Option<Usage>,
     #[serde(default)]
+    message: Option<MessageStart>,
+    #[serde(default)]
     error: Option<ApiError>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MessageStart {
+    #[serde(default)]
+    usage: Option<InputUsage>,
+}
+
+#[derive(Debug, Deserialize)]
+struct InputUsage {
+    #[serde(default)]
+    input_tokens: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -100,6 +114,24 @@ fn to_wire_messages(history: &[HistoryItem]) -> Vec<Value> {
     messages
 }
 
+/// 增量缓存：给最后一条消息的最后一个 content block 打 cache_control，
+/// 下一轮请求可命中到此为止的前缀
+fn attach_cache_control_to_last(messages: &mut [Value]) {
+    let Some(last) = messages.last_mut() else { return };
+    let content = &mut last["content"];
+    if let Some(text) = content.as_str() {
+        *content = json!([{
+            "type": "text",
+            "text": text,
+            "cache_control": {"type": "ephemeral"},
+        }]);
+    } else if let Some(blocks) = content.as_array_mut() {
+        if let Some(block) = blocks.last_mut() {
+            block["cache_control"] = json!({"type": "ephemeral"});
+        }
+    }
+}
+
 /// 流式状态机：按 content block index 累积 text / tool_use
 #[derive(Debug, Default)]
 struct BlockAccumulator {
@@ -144,14 +176,22 @@ pub async fn stream_chat(
     cancel: &std::sync::atomic::AtomicBool,
     mut on_delta: impl FnMut(LlmDelta),
 ) -> Result<AssistantTurn, String> {
+    let mut messages = to_wire_messages(history);
+    attach_cache_control_to_last(&mut messages);
+
     let mut body = json!({
         "model": model,
         "max_tokens": MAX_TOKENS,
         "stream": true,
-        "messages": to_wire_messages(history),
+        "messages": messages,
     });
     if let Some(system) = system {
-        body["system"] = json!(system);
+        // system 加 cache_control：tools+system 整体进 prompt cache，多轮会话省大头
+        body["system"] = json!([{
+            "type": "text",
+            "text": system,
+            "cache_control": {"type": "ephemeral"},
+        }]);
     }
     if !tools.is_empty() {
         body["tools"] = Value::Array(
@@ -201,6 +241,11 @@ pub async fn stream_chat(
             serde_json::from_str(&event.data).map_err(|e| format!("响应解析失败: {e}"))?;
 
         match data.event_type.as_str() {
+            "message_start" => {
+                if let Some(usage) = data.message.and_then(|m| m.usage) {
+                    turn.input_tokens = usage.input_tokens;
+                }
+            }
             "content_block_start" => {
                 if let (Some(index), Some(block)) = (data.index, data.content_block) {
                     if block.block_type == "tool_use" {

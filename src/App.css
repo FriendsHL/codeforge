@@ -666,6 +666,15 @@ body.resizing {
   max-width: 100%;
 }
 
+.chat-notice {
+  align-self: center;
+  color: #aaa;
+  font-size: 12px;
+  background: #fafafa;
+  border-radius: 10px;
+  padding: 3px 14px;
+}
+
 .working-row {
   display: flex;
   align-items: center;

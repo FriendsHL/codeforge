@@ -51,6 +51,8 @@ pub struct AssistantTurn {
     pub text: String,
     pub tool_calls: Vec<ToolCall>,
     pub stop_reason: Option<String>,
+    /// 本次请求的真实上下文大小（API usage 返回）
+    pub input_tokens: Option<u64>,
     pub output_tokens: Option<u64>,
 }
 

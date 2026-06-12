@@ -17,6 +17,7 @@ pub async fn send_message(
     provider: String,
     model: String,
     messages: Vec<ChatMessage>,
+    session_id: Option<i64>,
     channel: Channel<AgentEvent>,
     app: tauri::AppHandle,
     state: State<'_, AppState>,
@@ -38,22 +39,40 @@ pub async fn send_message(
         Arc::new(ToolRegistry::from_tools(tools))
     };
 
-    let history: Vec<HistoryItem> = truncate_history(
-        messages
-            .into_iter()
-            .filter(|m| !m.content.is_empty())
-            .map(|m| match m.role.as_str() {
-                "assistant" => HistoryItem::Assistant { text: m.content, tool_calls: vec![] },
-                _ => HistoryItem::User(m.content),
-            })
-            .collect(),
-    );
+    let raw_history: Vec<HistoryItem> = messages
+        .into_iter()
+        .filter(|m| !m.content.is_empty())
+        .map(|m| match m.role.as_str() {
+            "assistant" => HistoryItem::Assistant { text: m.content, tool_calls: vec![] },
+            _ => HistoryItem::User(m.content),
+        })
+        .collect();
 
     let on_event = |event: AgentEvent| {
         let _ = channel.send(event);
     };
 
+    // 跨轮压缩：超过阈值时把早前对话交给便宜模型摘要；失败则退回硬截断
+    let history = match compact_history(&endpoint, &api_key, &provider, &state.cancel, raw_history).await {
+        (history, Some(note)) => {
+            on_event(AgentEvent::ContextCompacted { note });
+            history
+        }
+        (history, None) => history,
+    };
+
     state.cancel.store(false, std::sync::atomic::Ordering::SeqCst); // 新回合清掉旧的停止标志
+
+    // OTel 风格本地 trace：traces/<session_id>.jsonl（无会话时不记）
+    let trace = session_id.and_then(|sid| {
+        use tauri::Manager;
+        app.path()
+            .app_data_dir()
+            .ok()
+            .and_then(|dir| crate::trace::TraceWriter::open(&dir.join("traces"), sid).ok())
+            .map(Arc::new)
+    });
+
     let ctx = AgentCtx {
         endpoint,
         api_key,
@@ -62,6 +81,8 @@ pub async fn send_message(
         workspace,
         permissions,
         cancel: state.cancel.clone(),
+        provider: provider.clone(),
+        trace,
     };
     let result = run_agent_loop(&ctx, history, &on_event).await;
 
@@ -71,20 +92,108 @@ pub async fn send_message(
     result
 }
 
-/// 超长对话截断：从最旧的消息开始丢，至少保留最后一条。
-/// 粗略按字符数对齐上下文窗口（中文 1 字符 ≈ 1 token+，150K 字符对 256K 窗口留足余量）。
-fn truncate_history(mut history: Vec<HistoryItem>) -> Vec<HistoryItem> {
-    const MAX_CHARS: usize = 150_000;
-    let size = |item: &HistoryItem| match item {
+fn item_chars(item: &HistoryItem) -> usize {
+    match item {
         HistoryItem::User(t) => t.chars().count(),
         HistoryItem::Assistant { text, .. } => text.chars().count(),
         HistoryItem::ToolResult { content, .. } => content.chars().count(),
-    };
-    let mut total: usize = history.iter().map(size).sum();
+    }
+}
+
+/// 兜底硬截断：从最旧的消息开始丢，至少保留最后一条
+fn truncate_history(mut history: Vec<HistoryItem>) -> Vec<HistoryItem> {
+    const MAX_CHARS: usize = 150_000;
+    let mut total: usize = history.iter().map(item_chars).sum();
     while history.len() > 1 && total > MAX_CHARS {
-        total -= size(&history.remove(0));
+        total -= item_chars(&history.remove(0));
     }
     history
+}
+
+/// 摘要压缩用的便宜模型（同 provider，省钱且 key 现成）
+fn cheap_model_for(provider: &str) -> &'static str {
+    match provider {
+        "ark" => "doubao-seed-2.0-lite",
+        "xiaomi-mimo" => "mimo-v2.5",
+        _ => "claude-haiku-4-5",
+    }
+}
+
+const COMPACT_TRIGGER_CHARS: usize = 100_000;
+const KEEP_RECENT_CHARS: usize = 40_000;
+
+/// 超阈值时：早前对话 → 便宜模型摘要块 + 最近原文。返回 (新历史, 提示文案)
+async fn compact_history(
+    endpoint: &registry::Endpoint,
+    api_key: &str,
+    provider: &str,
+    cancel: &Arc<std::sync::atomic::AtomicBool>,
+    history: Vec<HistoryItem>,
+) -> (Vec<HistoryItem>, Option<String>) {
+    let total: usize = history.iter().map(item_chars).sum();
+    if total <= COMPACT_TRIGGER_CHARS {
+        return (history, None);
+    }
+
+    // 从最新往回保留 KEEP_RECENT_CHARS 的原文，更早的进摘要
+    let mut kept = 0usize;
+    let mut split = history.len();
+    for (i, item) in history.iter().enumerate().rev() {
+        kept += item_chars(item);
+        if kept > KEEP_RECENT_CHARS {
+            split = i;
+            break;
+        }
+    }
+    if split == 0 || split >= history.len() {
+        return (truncate_history(history), Some("对话过长，已截断最早的消息".into()));
+    }
+
+    let old = &history[..split];
+    let old_chars: usize = old.iter().map(item_chars).sum();
+    let transcript: String = old
+        .iter()
+        .map(|item| match item {
+            HistoryItem::User(t) => format!("用户: {t}"),
+            HistoryItem::Assistant { text, .. } => format!("助手: {text}"),
+            HistoryItem::ToolResult { name, .. } => format!("(工具 {name} 的结果，略)"),
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n");
+
+    let system = "把下面的对话历史压缩成要点摘要：保留用户的目标与约束、已确认的决定、关键文件/路径/代码标识符、未完成的事项。用紧凑的中文要点列表，不要寒暄不要评论。";
+    let summary_history = vec![HistoryItem::User(transcript)];
+    let cheap = cheap_model_for(provider);
+    let result = match endpoint {
+        registry::Endpoint::Anthropic => {
+            crate::llm::anthropic::stream_chat(api_key, cheap, Some(system), &summary_history, &[], cancel, |_| {}).await
+        }
+        registry::Endpoint::OpenAiCompatible { chat_url, .. } => {
+            crate::llm::openai::stream_chat(chat_url, api_key, cheap, Some(system), &summary_history, &[], cancel, |_| {}).await
+        }
+    };
+
+    match result {
+        Ok(turn) if !turn.text.trim().is_empty() => {
+            let summary_chars = turn.text.chars().count();
+            let mut compacted = vec![HistoryItem::User(format!(
+                "[早前对话的自动摘要，原文已压缩]\n{}",
+                turn.text.trim()
+            ))];
+            compacted.extend_from_slice(&history[split..]);
+            (
+                compacted,
+                Some(format!(
+                    "已把早前 {} 条消息压缩为摘要（{old_chars} → {summary_chars} 字符）",
+                    split
+                )),
+            )
+        }
+        _ => (
+            truncate_history(history),
+            Some("摘要压缩失败，已按旧策略截断最早消息".into()),
+        ),
+    }
 }
 
 /// 停止当前回合：流式读取/loop/子 agent 尽快收尾；挂起的审批按拒绝处理

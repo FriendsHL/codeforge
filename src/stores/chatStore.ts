@@ -95,6 +95,7 @@ export function splitModelValue(value: string): { provider: string; model: strin
 
 export type ChatItem =
   | { kind: "msg"; role: "user" | "assistant"; content: string; reasoning?: string }
+  | { kind: "notice"; text: string }
   | {
       kind: "tool";
       id: string;
@@ -123,6 +124,8 @@ interface ChatState {
   currentSessionId: number | null;
   /** 本会话累计输出 tokens（仅 UI 提示用） */
   sessionTokens: number;
+  /** 最近一次请求的真实上下文大小（API usage.input_tokens） */
+  contextTokens: number | null;
   setModel: (model: string) => void;
   send: (text: string) => Promise<void>;
   clear: () => void;
@@ -136,6 +139,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   terminalOpen: false,
   currentSessionId: null,
   sessionTokens: 0,
+  contextTokens: null,
 
   setModel: (model) => {
     localStorage.setItem(MODEL_STORAGE_KEY, model);
@@ -177,10 +181,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
     }
 
-    // 跨轮次历史只保留纯文本消息（工具轮次每次由 Rust 端 loop 内部重建）
+    // 跨轮次历史只保留纯文本消息（工具轮次每次由 Rust 端 loop 内部重建；notice 不进历史）
     const history: ChatMessage[] = [
-      ...items
-        .filter((i): i is Extract<ChatItem, { kind: "msg" }> => i.kind === "msg")
+      ...get()
+        .items.filter((i): i is Extract<ChatItem, { kind: "msg" }> => i.kind === "msg")
         .filter((i) => i.content.trim() !== "")
         .map(({ role, content }) => ({ role, content })),
       { role: "user" as const, content: text },
@@ -219,7 +223,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     try {
       const { provider, model: modelId } = splitModelValue(model);
-      await sendMessage(provider, modelId, history, (event) => {
+      await sendMessage(provider, modelId, history, get().currentSessionId, (event) => {
         switch (event.type) {
           case "textDelta":
             appendToAssistant({ content: event.text });
@@ -274,9 +278,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
               return items;
             });
             break;
+          case "contextCompacted":
+            update((items) => {
+              items.push({ kind: "notice", text: `🗜 ${event.note}` });
+              return items;
+            });
+            break;
           case "turnEnd":
             if (event.outputTokens) {
               set((s) => ({ sessionTokens: s.sessionTokens + (event.outputTokens ?? 0) }));
+            }
+            if (event.inputTokens) {
+              set({ contextTokens: event.inputTokens });
             }
             // 把"为什么停"显式标注出来，不再让用户猜
             if (event.stopReason === "length" || event.stopReason === "max_tokens") {

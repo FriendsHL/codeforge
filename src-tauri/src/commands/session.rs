@@ -35,8 +35,18 @@ pub fn rename_session(id: i64, title: String, state: State<'_, SessionState>) ->
 }
 
 #[tauri::command]
-pub fn delete_session(id: i64, state: State<'_, SessionState>) -> Result<(), String> {
-    state.0.delete(id)
+pub fn delete_session(
+    id: i64,
+    app: tauri::AppHandle,
+    state: State<'_, SessionState>,
+) -> Result<(), String> {
+    state.0.delete(id)?;
+    // 一并清理该会话的 trace
+    use tauri::Manager;
+    if let Ok(dir) = app.path().app_data_dir() {
+        crate::trace::remove_trace(&dir.join("traces"), id);
+    }
+    Ok(())
 }
 
 #[tauri::command]
