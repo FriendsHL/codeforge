@@ -101,7 +101,7 @@ pub fn prompt_section(workspace: Option<&Path>) -> Option<String> {
         .collect::<Vec<_>>()
         .join("\n");
     Some(format!(
-        "可用技能（每项为 名称 (SKILL.md 路径): 说明）。任务与某技能匹配时，先用 load_skill 读取其完整指令（也可直接 read_file 读上面的 SKILL.md 路径）再开始干活：\n{list}"
+        "可用技能（每项为 名称 (SKILL.md 路径): 说明）。任务与某技能匹配时，先用 read_file 读取上面对应的 SKILL.md 路径获取完整指令，再按其步骤执行（正文里引用的脚本/资源就在该目录下）：\n{list}"
     ))
 }
 

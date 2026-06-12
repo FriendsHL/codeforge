@@ -7,7 +7,7 @@ A coding agent desktop app for macOS — sibling project of skillForge.
 ## 功能（v1.1）
 
 - **Agent loop**：自研 tool-use 循环，支持多轮工具链式调用（上限 30 轮）
-- **13 个内置工具**：read_file / list_dir / glob / grep / git_status / git_diff / git_log / write_file / edit_file / bash / web_fetch / web_search / load_skill
+- **内置工具**：read_file / list_dir / glob / grep / git_status / git_diff / git_log / write_file / edit_file / bash / web_fetch / web_search / todo_write，外加运行时注入的 browser_open / spawn_subagents 与 MCP 工具
 - **联网**：web_search（Tavily 可选，DuckDuckGo 零配置兜底）+ web_fetch（HTML 转可读文本）
 - **技能系统**：`<workspace>/.codeforge/skills/` 与 `~/.codeforge/skills/` 下的 SKILL.md 指令包，清单注入 prompt、正文按需加载；可直接放入 skillForge 技能
 - **MCP client**：自研最小 stdio 实现（initialize / tools/list / tools/call），`mcp.json` 配置 server，工具动态进注册表（`mcp__server__tool`），统一走审批

@@ -733,7 +733,7 @@ mod tests {
         .unwrap();
 
         let ctx = ark_ctx(Some(workspace));
-        let loaded_skill = std::sync::atomic::AtomicBool::new(false);
+        let read_skill = std::sync::atomic::AtomicBool::new(false);
         let final_text = std::sync::Mutex::new(String::new());
 
         run_agent_loop(
@@ -742,8 +742,9 @@ mod tests {
             &|event| match event {
                 AgentEvent::ToolCallStart { name, input, .. } => {
                     println!(">> 工具调用: {name} {input}");
-                    if name == "load_skill" {
-                        loaded_skill.store(true, std::sync::atomic::Ordering::SeqCst);
+                    // 改用 read_file 读 SKILL.md（不再有 load_skill 工具）
+                    if name == "read_file" && input.to_string().contains("SKILL.md") {
+                        read_skill.store(true, std::sync::atomic::Ordering::SeqCst);
                     }
                 }
                 AgentEvent::TextDelta { text } => final_text.lock().unwrap().push_str(&text),
@@ -755,7 +756,7 @@ mod tests {
 
         let text = final_text.lock().unwrap().clone();
         println!("最终回答:\n{text}");
-        assert!(loaded_skill.load(std::sync::atomic::Ordering::SeqCst));
+        assert!(read_skill.load(std::sync::atomic::Ordering::SeqCst), "应 read_file 读 SKILL.md");
         assert!(text.contains("FORGE-2026"));
     }
 
