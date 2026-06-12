@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { Button, Input, Tag, Typography } from "antd";
+import { invoke } from "@tauri-apps/api/core";
+import { Alert, Button, Input, Tag, Typography } from "antd";
 import {
   CloseOutlined,
   DiffOutlined,
@@ -21,18 +22,26 @@ function BrowserView({ url }: { url: string }) {
   const [draft, setDraft] = useState(url);
   const [current, setCurrent] = useState(url);
   const [reloadKey, setReloadKey] = useState(0);
+  const [unreachable, setUnreachable] = useState(false);
+
+  const probe = (target: string) => {
+    void invoke<boolean>("probe_url", { url: target }).then((ok) => setUnreachable(!ok));
+  };
 
   useEffect(() => {
     setDraft(url);
     setCurrent(url);
+    probe(url);
   }, [url]);
 
-  const go = () => {
-    const next = normalizeUrl(draft);
+  const go = (target?: string) => {
+    const next = normalizeUrl(target ?? draft);
     if (!next) return;
     setDraft(next);
     setCurrent(next);
+    setReloadKey((k) => k + 1);
     localStorage.setItem("codeforge.browser.url", next);
+    probe(next);
   };
 
   return (
@@ -42,18 +51,22 @@ function BrowserView({ url }: { url: string }) {
           size="small"
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
-          onPressEnter={go}
+          onPressEnter={() => go()}
           placeholder="http://localhost:3000"
         />
-        <Button size="small" type="primary" onClick={go}>
+        <Button size="small" type="primary" onClick={() => go()}>
           打开
         </Button>
-        <Button
-          size="small"
-          icon={<ReloadOutlined />}
-          onClick={() => setReloadKey((k) => k + 1)}
-        />
+        <Button size="small" icon={<ReloadOutlined />} onClick={() => go(current)} />
       </div>
+      {unreachable && (
+        <Alert
+          type="warning"
+          showIcon
+          banner
+          message={`连不上 ${current} —— 请确认服务已启动，再点刷新`}
+        />
+      )}
       <iframe
         key={`${current}-${reloadKey}`}
         src={current}

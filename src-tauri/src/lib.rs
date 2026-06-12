@@ -76,6 +76,7 @@ pub fn run() {
             commands::session::save_session_items,
             commands::session::list_projects,
             commands::session::remove_project,
+            commands::browser::probe_url,
             commands::mcp::mcp_status,
             commands::mcp::mcp_reload,
             commands::mcp::mcp_config_path,

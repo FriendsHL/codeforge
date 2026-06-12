@@ -1,3 +1,4 @@
+pub mod browser;
 pub mod chat;
 pub mod git;
 pub mod mcp;
