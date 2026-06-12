@@ -1,17 +1,29 @@
 import { useEffect, useRef, useState } from "react";
-import { Alert, Button, Empty, Input, Tooltip } from "antd";
-import { ClearOutlined, SendOutlined } from "@ant-design/icons";
+import { Alert, App, Button, Empty, Input, Tooltip } from "antd";
+import { ClearOutlined, SendOutlined, StopOutlined } from "@ant-design/icons";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { useChatStore } from "../../stores/chatStore";
+import { stopGeneration } from "../../lib/ipc";
+import { ChatItem, useChatStore } from "../../stores/chatStore";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
 import { ApprovalCard } from "./ApprovalCard";
+import { ThinkingCard } from "./ThinkingCard";
 import { ToolCallCard } from "./ToolCallCard";
 import { TerminalPanel } from "../terminal/TerminalPanel";
+
+/** 流式期间的状态指示：根据最后一个条目推断 agent 正在干什么 */
+function workingLabel(items: ChatItem[]): string {
+  const last = items[items.length - 1];
+  if (last?.kind === "approval" && !last.decision) return "等待你的审批";
+  if (last?.kind === "tool" && !last.done) return "执行工具中";
+  if (last?.kind === "msg" && last.role === "assistant" && last.content) return "回答中";
+  return "思考中";
+}
 
 export function ChatView() {
   const { items, streaming, error, send, clear, terminalOpen, sessionTokens } = useChatStore();
   const workspaceName = useWorkspaceStore((s) => s.name);
+  const { message } = App.useApp();
   const [draft, setDraft] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -26,6 +38,10 @@ export function ChatView() {
     void send(text);
   };
 
+  const stop = () => {
+    void stopGeneration().catch((e) => message.error(String(e)));
+  };
+
   const emptyHint = workspaceName
     ? `已打开 ${workspaceName}，问点关于这个项目的问题试试`
     : "发个消息试试；打开项目目录后可以问代码库相关的问题";
@@ -34,24 +50,37 @@ export function ChatView() {
     <div className="chat-view">
       <div className="chat-messages" ref={scrollRef}>
         {items.length === 0 && <Empty description={emptyHint} style={{ marginTop: "20vh" }} />}
-        {items.map((item, index) =>
-          item.kind === "tool" ? (
-            <ToolCallCard key={item.id} item={item} />
-          ) : item.kind === "approval" ? (
-            <ApprovalCard key={item.requestId} item={item} />
-          ) : (
+        {items.map((item, index) => {
+          if (item.kind === "tool") return <ToolCallCard key={item.id} item={item} />;
+          if (item.kind === "approval") return <ApprovalCard key={item.requestId} item={item} />;
+          const isLast = index === items.length - 1;
+          const reasoningLive =
+            streaming && isLast && item.role === "assistant" && !item.content;
+          return (
             <div key={index} className={`chat-bubble chat-bubble-${item.role}`}>
-              {item.reasoning && <div className="chat-reasoning">{item.reasoning}</div>}
+              {item.reasoning && (
+                <ThinkingCard text={item.reasoning} live={reasoningLive} />
+              )}
               {item.role === "assistant" ? (
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                  {item.content || (item.reasoning ? "" : "…")}
+                  {item.content || ""}
                 </ReactMarkdown>
               ) : (
                 item.content
               )}
             </div>
-          ),
+          );
+        })}
+
+        {streaming && (
+          <div className="working-row">
+            <span className="working-dots">
+              <span /><span /><span />
+            </span>
+            {workingLabel(items)}
+          </div>
         )}
+
         {error && <Alert type="error" message={error} showIcon />}
       </div>
 
@@ -78,9 +107,15 @@ export function ChatView() {
         <Tooltip title="清空会话">
           <Button icon={<ClearOutlined />} onClick={clear} disabled={streaming} />
         </Tooltip>
-        <Button type="primary" icon={<SendOutlined />} onClick={submit} loading={streaming}>
-          发送
-        </Button>
+        {streaming ? (
+          <Button danger type="primary" icon={<StopOutlined />} onClick={stop}>
+            停止
+          </Button>
+        ) : (
+          <Button type="primary" icon={<SendOutlined />} onClick={submit}>
+            发送
+          </Button>
+        )}
       </div>
     </div>
   );

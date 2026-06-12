@@ -72,6 +72,8 @@ export const gitFileDiff = (path: string) => invoke<string>("git_file_diff", { p
 export const approvePermission = (requestId: string, approved: boolean, allowAll: boolean) =>
   invoke<void>("approve_permission", { requestId, approved, allowAll });
 
+export const stopGeneration = () => invoke<void>("stop_generation");
+
 export interface SessionMeta {
   id: number;
   title: string;

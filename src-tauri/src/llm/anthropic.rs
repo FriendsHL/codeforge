@@ -141,6 +141,7 @@ pub async fn stream_chat(
     system: Option<&str>,
     history: &[HistoryItem],
     tools: &[ToolSpec],
+    cancel: &std::sync::atomic::AtomicBool,
     mut on_delta: impl FnMut(LlmDelta),
 ) -> Result<AssistantTurn, String> {
     let mut body = json!({
@@ -192,6 +193,9 @@ pub async fn stream_chat(
 
     let mut stream = response.bytes_stream().eventsource();
     while let Some(event) = stream.next().await {
+        if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+            return Err(crate::llm::types::CANCELLED_ERR.into());
+        }
         let event = event.map_err(|e| format!("流读取失败: {e}"))?;
         let data: SseData =
             serde_json::from_str(&event.data).map_err(|e| format!("响应解析失败: {e}"))?;

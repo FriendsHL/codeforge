@@ -59,6 +59,13 @@ impl PermissionManager {
         self.allow_all.store(false, Ordering::SeqCst);
         self.pending.lock().unwrap().clear();
     }
+
+    /// 用户点停止：所有挂起中的审批一律按拒绝决议，立刻解除 loop 的等待
+    pub fn deny_all_pending(&self) {
+        for (_, sender) in self.pending.lock().unwrap().drain() {
+            let _ = sender.send(false);
+        }
+    }
 }
 
 #[cfg(test)]

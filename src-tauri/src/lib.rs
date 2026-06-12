@@ -21,6 +21,8 @@ pub struct AppState {
     pub tools: Arc<ToolRegistry>,
     pub permissions: Arc<PermissionManager>,
     pub watcher: Mutex<Option<notify::RecommendedWatcher>>,
+    /// 停止按钮的取消标志（一次只有一个活动回合）
+    pub cancel: Arc<std::sync::atomic::AtomicBool>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -55,10 +57,12 @@ pub fn run() {
             tools: Arc::new(ToolRegistry::builtin()),
             permissions: Arc::new(PermissionManager::default()),
             watcher: Mutex::new(None),
+            cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         })
         .invoke_handler(tauri::generate_handler![
             commands::chat::send_message,
             commands::chat::approve_permission,
+            commands::chat::stop_generation,
             commands::settings::set_api_key,
             commands::settings::has_api_key,
             commands::settings::set_provider_key,

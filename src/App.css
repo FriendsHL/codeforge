@@ -561,16 +561,81 @@ body.resizing {
   margin-bottom: 0;
 }
 
-.chat-reasoning {
-  color: #999;
-  font-size: 12px;
-  line-height: 1.5;
-  border-left: 3px solid #eee;
-  padding-left: 10px;
+.thinking-card {
   margin-bottom: 8px;
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+  background: #fcfcfc;
+  font-size: 12px;
+}
+
+.thinking-live {
+  border-color: #ffd591;
+}
+
+.thinking-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  cursor: pointer;
+  color: #888;
+  user-select: none;
+}
+
+.thinking-meta {
+  color: #bbb;
+  margin-left: auto;
+}
+
+.thinking-body {
+  color: #999;
+  line-height: 1.6;
+  padding: 0 10px 8px 26px;
   white-space: pre-wrap;
-  max-height: 160px;
+  max-height: 180px;
   overflow-y: auto;
+}
+
+.working-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #999;
+  font-size: 13px;
+  padding: 2px 6px;
+}
+
+.working-dots {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.working-dots span {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #d46b08;
+  animation: working-bounce 1.2s infinite ease-in-out;
+}
+
+.working-dots span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.working-dots span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes working-bounce {
+  0%, 70%, 100% {
+    transform: translateY(0);
+    opacity: 0.4;
+  }
+  35% {
+    transform: translateY(-5px);
+    opacity: 1;
+  }
 }
 
 .chat-bubble-assistant pre {

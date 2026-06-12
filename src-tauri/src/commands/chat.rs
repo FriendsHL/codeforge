@@ -50,6 +50,7 @@ pub async fn send_message(
         let _ = channel.send(event);
     };
 
+    state.cancel.store(false, std::sync::atomic::Ordering::SeqCst); // 新回合清掉旧的停止标志
     let ctx = AgentCtx {
         endpoint,
         api_key,
@@ -57,6 +58,7 @@ pub async fn send_message(
         registry: tool_registry,
         workspace,
         permissions,
+        cancel: state.cancel.clone(),
     };
     let result = run_agent_loop(&ctx, history, &on_event).await;
 
@@ -80,6 +82,14 @@ fn truncate_history(mut history: Vec<HistoryItem>) -> Vec<HistoryItem> {
         total -= size(&history.remove(0));
     }
     history
+}
+
+/// 停止当前回合：流式读取/loop/子 agent 尽快收尾；挂起的审批按拒绝处理
+#[tauri::command]
+pub fn stop_generation(state: State<'_, AppState>) -> Result<(), String> {
+    state.cancel.store(true, std::sync::atomic::Ordering::SeqCst);
+    state.permissions.deny_all_pending();
+    Ok(())
 }
 
 /// 前端对 PermissionAsk 的决议

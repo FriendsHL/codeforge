@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+/// 用户主动停止的标记错误（loop 捕获后优雅收尾，不当成真错误）
+pub const CANCELLED_ERR: &str = "__CF_CANCELLED__";
+
 /// 前端发来的简单消息（不含工具轮次）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMessage {

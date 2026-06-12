@@ -30,6 +30,12 @@ pub struct AgentCtx {
     pub registry: Arc<ToolRegistry>,
     pub workspace: Option<PathBuf>,
     pub permissions: Arc<PermissionManager>,
+    /// 停止按钮：置 true 后流式读取、loop 迭代、子 agent 都会尽快收尾
+    pub cancel: Arc<std::sync::atomic::AtomicBool>,
+}
+
+fn is_cancelled(ctx: &AgentCtx) -> bool {
+    ctx.cancel.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 /// 事件回调 trait object（带生命周期参数：调用方的闭包可以借用本地变量）
@@ -89,7 +95,21 @@ fn loop_impl<'a>(
         let mut final_text = String::new();
 
         for _ in 0..MAX_ITERATIONS {
-            let turn = call_llm(ctx, &system, &history, &tools, on_event).await?;
+            if is_cancelled(ctx) {
+                if is_main {
+                    on_event(AgentEvent::TurnEnd { stop_reason: Some("cancelled".into()), output_tokens: None });
+                }
+                return Ok(final_text);
+            }
+            let turn = match call_llm(ctx, &system, &history, &tools, on_event).await {
+                Err(e) if e == crate::llm::types::CANCELLED_ERR => {
+                    if is_main {
+                        on_event(AgentEvent::TurnEnd { stop_reason: Some("cancelled".into()), output_tokens: None });
+                    }
+                    return Ok(final_text);
+                }
+                other => other?,
+            };
 
             if !turn.text.is_empty() {
                 if !final_text.is_empty() {
@@ -112,6 +132,12 @@ fn loop_impl<'a>(
             }
 
             for call in tool_calls {
+                if is_cancelled(ctx) {
+                    if is_main {
+                        on_event(AgentEvent::TurnEnd { stop_reason: Some("cancelled".into()), output_tokens: None });
+                    }
+                    return Ok(final_text);
+                }
                 let event_id = format!("{id_prefix}{}", call.id);
                 let input: Value = serde_json::from_str(&call.arguments)
                     .unwrap_or(Value::Object(Default::default()));
@@ -219,8 +245,16 @@ async fn call_llm(
     };
     match ctx.endpoint {
         Endpoint::Anthropic => {
-            anthropic::stream_chat(&ctx.api_key, &ctx.model, Some(system), history, tools, on_delta)
-                .await
+            anthropic::stream_chat(
+                &ctx.api_key,
+                &ctx.model,
+                Some(system),
+                history,
+                tools,
+                &ctx.cancel,
+                on_delta,
+            )
+            .await
         }
         Endpoint::OpenAiCompatible { chat_url, .. } => {
             openai::stream_chat(
@@ -230,6 +264,7 @@ async fn call_llm(
                 Some(system),
                 history,
                 tools,
+                &ctx.cancel,
                 on_delta,
             )
             .await
@@ -318,6 +353,7 @@ mod tests {
             registry: Arc::new(ToolRegistry::builtin()),
             workspace,
             permissions: Arc::new(PermissionManager::default()),
+            cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
     }
 
