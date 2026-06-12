@@ -28,11 +28,7 @@ pub async fn run_agent_loop(
     on_event: impl Fn(AgentEvent),
 ) -> Result<(), String> {
     let system = prompt::build_system_prompt(workspace.as_deref());
-    let tools: Vec<ToolSpec> = if workspace.is_some() {
-        registry.specs()
-    } else {
-        Vec::new()
-    };
+    let tools: Vec<ToolSpec> = registry.specs(workspace.is_some());
 
     for _ in 0..MAX_ITERATIONS {
         let turn = call_llm(endpoint, api_key, model, &system, &history, &tools, &on_event).await?;
@@ -125,11 +121,14 @@ async fn execute_tool(
     input: Value,
     on_event: &impl Fn(AgentEvent),
 ) -> Result<String, String> {
-    let Some(workspace) = workspace.cloned() else {
-        return Err("未打开工作区，无法使用工具".into());
-    };
     let Some(tool) = registry.get(name) else {
         return Err(format!("未知工具: {name}"));
+    };
+    // 不依赖工作区的工具（联网/技能/MCP）在纯聊天模式下用临时目录兜底
+    let workspace = match workspace {
+        Some(ws) => ws.clone(),
+        None if !tool.needs_workspace() => std::env::temp_dir(),
+        None => return Err("该工具需要先打开项目目录".into()),
     };
 
     // 写类工具先预演 diff 走审批
@@ -475,5 +474,46 @@ for line in sys.stdin:
         println!("最终回答:\n{text}");
         assert!(mcp_called.load(std::sync::atomic::Ordering::SeqCst), "应调用 MCP 工具");
         assert!(text.contains("MCP-7"), "回答应包含 MCP 工具返回的特征值: {text}");
+    }
+
+    /// 真实 API 集成测试：未打开工作区（纯聊天模式）也能联网搜索
+    /// cargo test live_agent_searches_without_workspace -- --ignored --nocapture
+    #[tokio::test]
+    #[ignore]
+    async fn live_agent_searches_without_workspace() {
+        let endpoint = registry::resolve("ark").unwrap();
+        let api_key = registry::api_key_for(&endpoint).unwrap();
+
+        let searched = std::sync::atomic::AtomicBool::new(false);
+        let final_text = std::sync::Mutex::new(String::new());
+
+        run_agent_loop(
+            &endpoint,
+            &api_key,
+            "doubao-seed-2.0-pro",
+            vec![HistoryItem::User(
+                "联网搜一下 Tauri 2 官网地址是什么，告诉我链接。".into(),
+            )],
+            Arc::new(ToolRegistry::builtin()),
+            None, // 关键：没有工作区
+            Arc::new(PermissionManager::default()),
+            |event| match event {
+                AgentEvent::ToolCallStart { name, input, .. } => {
+                    println!(">> 工具调用: {name} {input}");
+                    if name == "web_search" || name == "web_fetch" {
+                        searched.store(true, std::sync::atomic::Ordering::SeqCst);
+                    }
+                }
+                AgentEvent::TextDelta { text } => final_text.lock().unwrap().push_str(&text),
+                _ => {}
+            },
+        )
+        .await
+        .unwrap();
+
+        let text = final_text.lock().unwrap().clone();
+        println!("最终回答:\n{text}");
+        assert!(searched.load(std::sync::atomic::Ordering::SeqCst), "应调用 web 工具");
+        assert!(text.contains("tauri.app"), "回答应包含官网链接: {text}");
     }
 }

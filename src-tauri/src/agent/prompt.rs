@@ -30,6 +30,17 @@ pub fn build_system_prompt(workspace: Option<&Path>) -> String {
         if let Some(skills_section) = crate::skills::prompt_section(Some(workspace)) {
             sections.push(skills_section);
         }
+    } else {
+        sections.push(
+            "\
+当前未打开项目目录（纯聊天模式）：
+- 你仍可联网：web_search 搜索、web_fetch 阅读网页，遇到时效性问题主动用它们。
+- 用户要操作某个代码库时，请提示其点顶栏「打开项目」。"
+                .into(),
+        );
+        if let Some(skills_section) = crate::skills::prompt_section(None) {
+            sections.push(skills_section);
+        }
     }
 
     sections.join("\n\n")

@@ -25,6 +25,11 @@ impl Tool for LoadSkillTool {
         }
     }
 
+    /// 全局技能（~/.codeforge/skills）不依赖工作区
+    fn needs_workspace(&self) -> bool {
+        false
+    }
+
     fn run(&self, workspace: &Path, input: &Value) -> Result<String, String> {
         let name = input["name"].as_str().ok_or("缺少 name 参数")?;
         skills::load(Some(workspace), name)

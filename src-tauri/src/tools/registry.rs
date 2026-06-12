@@ -18,6 +18,10 @@ pub struct ApprovalPlan {
 pub trait Tool: Send + Sync {
     fn spec(&self) -> ToolSpec;
     fn run(&self, workspace: &Path, input: &Value) -> Result<String, String>;
+    /// 是否依赖已打开的工作区。联网/技能/MCP 这类工具不依赖，纯聊天模式也可用
+    fn needs_workspace(&self) -> bool {
+        true
+    }
     /// 返回 Some(plan) 的工具有副作用，执行前必须经用户审批；只读工具保持默认 None
     fn plan(&self, _workspace: &Path, _input: &Value) -> Result<Option<ApprovalPlan>, String> {
         Ok(None)
@@ -68,8 +72,13 @@ impl ToolRegistry {
         }
     }
 
-    pub fn specs(&self) -> Vec<ToolSpec> {
-        self.tools.iter().map(|t| t.spec()).collect()
+    /// 工具声明列表；未打开工作区时只暴露不依赖工作区的工具
+    pub fn specs(&self, has_workspace: bool) -> Vec<ToolSpec> {
+        self.tools
+            .iter()
+            .filter(|t| has_workspace || !t.needs_workspace())
+            .map(|t| t.spec())
+            .collect()
     }
 
     pub fn get(&self, name: &str) -> Option<Arc<dyn Tool>> {

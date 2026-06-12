@@ -47,6 +47,10 @@ impl Tool for WebFetchTool {
         }
     }
 
+    fn needs_workspace(&self) -> bool {
+        false
+    }
+
     fn run(&self, _workspace: &Path, input: &Value) -> Result<String, String> {
         let url = input["url"].as_str().ok_or("缺少 url 参数")?;
         if !url.starts_with("http://") && !url.starts_with("https://") {
@@ -192,6 +196,10 @@ impl Tool for WebSearchTool {
                 "required": ["query"]
             }),
         }
+    }
+
+    fn needs_workspace(&self) -> bool {
+        false
     }
 
     fn run(&self, _workspace: &Path, input: &Value) -> Result<String, String> {

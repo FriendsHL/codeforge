@@ -52,6 +52,11 @@ impl Tool for McpToolAdapter {
         }))
     }
 
+    /// MCP 工具自带执行环境，不依赖工作区
+    fn needs_workspace(&self) -> bool {
+        false
+    }
+
     fn run(&self, _workspace: &Path, input: &Value) -> Result<String, String> {
         self.connection.call_tool(&self.def.name, input.clone())
     }
