@@ -16,6 +16,7 @@ pub enum AgentEvent {
         id: String,
         output: String,
         is_error: bool,
+        duration_ms: u64,
     },
     /// 副作用操作审批请求：前端弹 diff/命令，用户经 approve_permission 决议
     #[serde(rename_all = "camelCase")]

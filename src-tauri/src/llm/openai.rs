@@ -160,9 +160,11 @@ pub async fn stream_chat(
     cancel: &std::sync::atomic::AtomicBool,
     mut on_delta: impl FnMut(LlmDelta),
 ) -> Result<AssistantTurn, String> {
+    // 不设 max_tokens 会落到 provider 默认值（火山仅 4K，长回答被静默截断）
     let mut body = json!({
         "model": model,
         "stream": true,
+        "max_tokens": 16384,
         "messages": to_wire_messages(system, history),
     });
     if !tools.is_empty() {

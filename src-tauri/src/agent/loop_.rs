@@ -147,6 +147,7 @@ fn loop_impl<'a>(
                     input: input.clone(),
                 });
 
+                let started = std::time::Instant::now();
                 let result = if call.name == SUBAGENT_TOOL {
                     if is_main {
                         run_subagents(ctx, &input, on_event, &event_id).await
@@ -165,6 +166,7 @@ fn loop_impl<'a>(
                     id: event_id,
                     output: preview(&content),
                     is_error,
+                    duration_ms: started.elapsed().as_millis() as u64,
                 });
                 history.push(HistoryItem::ToolResult {
                     call_id: call.id,

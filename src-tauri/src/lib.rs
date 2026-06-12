@@ -80,6 +80,7 @@ pub fn run() {
             commands::session::save_session_items,
             commands::session::list_projects,
             commands::session::remove_project,
+            commands::info::list_capabilities,
             commands::browser::probe_url,
             commands::browser::browser_show,
             commands::browser::browser_bounds,

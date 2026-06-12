@@ -9,7 +9,7 @@ export type AgentEvent =
   | { type: "textDelta"; text: string }
   | { type: "reasoningDelta"; text: string }
   | { type: "toolCallStart"; id: string; name: string; input: unknown }
-  | { type: "toolCallEnd"; id: string; output: string; isError: boolean }
+  | { type: "toolCallEnd"; id: string; output: string; isError: boolean; durationMs: number }
   | { type: "permissionAsk"; requestId: string; toolName: string; summary: string; diff: string }
   | { type: "commandOutput"; id: string; chunk: string }
   | { type: "turnEnd"; stopReason: string | null; outputTokens: number | null }
@@ -73,6 +73,18 @@ export const approvePermission = (requestId: string, approved: boolean, allowAll
   invoke<void>("approve_permission", { requestId, approved, allowAll });
 
 export const stopGeneration = () => invoke<void>("stop_generation");
+
+export interface CapabilityItem {
+  name: string;
+  description: string;
+}
+
+export interface Capabilities {
+  tools: CapabilityItem[];
+  skills: CapabilityItem[];
+}
+
+export const listCapabilities = () => invoke<Capabilities>("list_capabilities");
 
 export interface SessionMeta {
   id: number;

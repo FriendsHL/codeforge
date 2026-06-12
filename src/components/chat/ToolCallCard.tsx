@@ -70,6 +70,13 @@ export function ToolCallCard({ item }: { item: Extract<ChatItem, { kind: "tool" 
     <CheckCircleOutlined style={{ color: "#389e0d" }} />
   );
 
+  const duration =
+    item.done && item.durationMs !== undefined
+      ? item.durationMs >= 1000
+        ? `${(item.durationMs / 1000).toFixed(1)}s`
+        : `${item.durationMs}ms`
+      : null;
+
   return (
     <Collapse
       size="small"
@@ -82,6 +89,7 @@ export function ToolCallCard({ item }: { item: Extract<ChatItem, { kind: "tool" 
               <ToolOutlined />
               <Tag>{TOOL_LABELS[item.name] ?? item.name}</Tag>
               <code className="tool-card-summary">{summarizeInput(item.name, item.input)}</code>
+              {duration && <span className="tool-card-duration">{duration}</span>}
               {status}
             </span>
           ),

@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Alert, Button, Input, Tag, Typography } from "antd";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import { Alert, Button, Input, Segmented, Tag, Typography } from "antd";
 import {
   CloseOutlined,
   DiffOutlined,
@@ -115,6 +117,53 @@ function BrowserView({ url }: { url: string }) {
   );
 }
 
+/** markdown 文件：渲染效果 / 源码 双视图 */
+function FileBody({ path, content }: { path: string; content: string }) {
+  const isMarkdown = /\.(md|markdown)$/i.test(path);
+  const [mode, setMode] = useState<"rendered" | "source">("rendered");
+
+  if (isMarkdown) {
+    return (
+      <>
+        <Segmented
+          size="small"
+          value={mode}
+          onChange={(v) => setMode(v as "rendered" | "source")}
+          options={[
+            { label: "渲染", value: "rendered" },
+            { label: "源码", value: "source" },
+          ]}
+          style={{ marginBottom: 8 }}
+        />
+        {mode === "rendered" ? (
+          <div className="md-rendered">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+          </div>
+        ) : (
+          <pre className="viewer-code">
+            <code
+              dangerouslySetInnerHTML={{ __html: highlightCode(content, "markdown") }}
+            />
+          </pre>
+        )}
+      </>
+    );
+  }
+
+  return (
+    <pre className="viewer-code">
+      <code
+        dangerouslySetInnerHTML={{
+          __html:
+            content.length > 150_000
+              ? content.replace(/&/g, "&amp;").replace(/</g, "&lt;")
+              : highlightCode(content, languageForPath(path)),
+        }}
+      />
+    </pre>
+  );
+}
+
 /** 文件 / diff / 浏览器查看器：位于主交互区与右栏之间 */
 export function ViewerPanel() {
   const { content, close } = useViewerStore();
@@ -151,16 +200,7 @@ export function ViewerPanel() {
                   文件过大，仅显示前 200KB
                 </Typography.Text>
               )}
-              <pre className="viewer-code">
-                <code
-                  dangerouslySetInnerHTML={{
-                    __html:
-                      content.content.length > 150_000
-                        ? content.content.replace(/&/g, "&amp;").replace(/</g, "&lt;")
-                        : highlightCode(content.content, languageForPath(content.path)),
-                  }}
-                />
-              </pre>
+              <FileBody path={content.path} content={content.content} />
             </>
           ) : (
             <DiffView path={content.path} diff={content.diff} />

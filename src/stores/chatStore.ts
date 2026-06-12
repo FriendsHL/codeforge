@@ -1,8 +1,58 @@
 import { create } from "zustand";
-import { ChatMessage, createSession, saveSessionItems, sendMessage } from "../lib/ipc";
+import {
+  ChatMessage,
+  createSession,
+  listCapabilities,
+  saveSessionItems,
+  sendMessage,
+} from "../lib/ipc";
+import { invoke } from "@tauri-apps/api/core";
 import { termWrite } from "../lib/terminal";
 import { useGitStore } from "./gitStore";
 import { useSessionStore } from "./sessionStore";
+
+const SLASH_HELP = `可用快捷命令：
+- \`/tools\` 当前可用工具清单
+- \`/skills\` 当前已装技能
+- \`/mcp\` MCP server 连接状态
+- \`/help\` 本帮助`;
+
+/** 本地快捷命令（不经过 LLM）。返回 null 表示不是已知命令 */
+async function runSlashCommand(text: string): Promise<string | null> {
+  const cmd = text.split(/\s/)[0].toLowerCase();
+  switch (cmd) {
+    case "/help":
+      return SLASH_HELP;
+    case "/tools": {
+      const caps = await listCapabilities();
+      const rows = caps.tools.map((t) => `| \`${t.name}\` | ${t.description} |`).join("\n");
+      return `**当前可用工具（${caps.tools.length} 个）**\n\n| 工具 | 说明 |\n|---|---|\n${rows}`;
+    }
+    case "/skills": {
+      const caps = await listCapabilities();
+      if (caps.skills.length === 0) {
+        return "当前没有已安装的技能。把 SKILL.md 技能包放进 `~/.codeforge/skills/` 或项目的 `.codeforge/skills/`。";
+      }
+      const rows = caps.skills.map((s) => `| \`${s.name}\` | ${s.description} |`).join("\n");
+      return `**当前技能（${caps.skills.length} 个）**\n\n| 技能 | 说明 |\n|---|---|\n${rows}`;
+    }
+    case "/mcp": {
+      const servers = await invoke<{ name: string; connected: boolean; toolCount: number; error: string | null }[]>("mcp_status");
+      if (servers.length === 0) {
+        return "未配置 MCP server。在设置里查看 mcp.json 路径，配置后点「重新加载」。";
+      }
+      return servers
+        .map((s) =>
+          s.connected
+            ? `- ✅ **${s.name}**：${s.toolCount} 个工具`
+            : `- ❌ **${s.name}**：${s.error ?? "连接失败"}`,
+        )
+        .join("\n");
+    }
+    default:
+      return cmd.startsWith("/") ? `未知命令 \`${cmd}\`\n\n${SLASH_HELP}` : null;
+  }
+}
 
 // value 格式: "<provider>/<model>"，provider 对应 Rust 端 llm/registry.rs
 export const MODEL_GROUPS = [
@@ -52,6 +102,7 @@ export type ChatItem =
       input: unknown;
       output?: string;
       isError?: boolean;
+      durationMs?: number;
       done: boolean;
     }
   | {
@@ -94,6 +145,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
   send: async (text) => {
     const { items, model, streaming } = get();
     if (streaming || !text.trim()) return;
+
+    // 快捷命令本地处理，不经过 LLM、不落库
+    if (text.trim().startsWith("/")) {
+      const reply = await runSlashCommand(text.trim());
+      if (reply !== null) {
+        set({
+          items: [
+            ...items,
+            { kind: "msg", role: "user", content: text.trim() },
+            { kind: "msg", role: "assistant", content: reply },
+          ],
+        });
+        return;
+      }
+    }
 
     // 首条消息时落库建会话（标题取消息前 24 字，归属当前项目）
     if (get().currentSessionId === null) {
@@ -185,7 +251,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
             update((items) =>
               items.map((item) =>
                 item.kind === "tool" && item.id === event.id
-                  ? { ...item, output: event.output, isError: event.isError, done: true }
+                  ? {
+                      ...item,
+                      output: event.output,
+                      isError: event.isError,
+                      durationMs: event.durationMs,
+                      done: true,
+                    }
                   : item,
               ),
             );
@@ -205,6 +277,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
           case "turnEnd":
             if (event.outputTokens) {
               set((s) => ({ sessionTokens: s.sessionTokens + (event.outputTokens ?? 0) }));
+            }
+            // 把"为什么停"显式标注出来，不再让用户猜
+            if (event.stopReason === "length" || event.stopReason === "max_tokens") {
+              appendToAssistant({
+                content: "\n\n> ⚠️ 输出达到单轮 max_tokens 上限被截断，可以说「继续」让我接着写",
+              });
+            } else if (event.stopReason === "cancelled") {
+              appendToAssistant({ content: "\n\n> ⏹ 已手动停止" });
             }
             break;
           case "error":

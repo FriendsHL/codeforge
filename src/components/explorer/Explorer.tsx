@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { App, Empty, Tree } from "antd";
 import type { TreeDataNode } from "antd";
 import { readDirTree } from "../../lib/ipc";
@@ -31,27 +32,34 @@ function toTreeNodes(nodes: { path: string; name: string; isDir: boolean }[]): T
   }));
 }
 
-/** 把懒加载的子节点挂到树上对应位置 */
-function attachChildren(
-  tree: TreeDataNode[],
-  key: string,
-  children: TreeDataNode[],
-): TreeDataNode[] {
-  return tree.map((node) => {
-    if (node.key === key) return { ...node, children };
-    if (node.children) {
-      return { ...node, children: attachChildren(node.children, key, children) };
-    }
-    return node;
-  });
-}
-
 export function Explorer({ view }: { view: "files" | "changes" }) {
   const { message } = App.useApp();
   const { version } = useWorkspaceStore();
   const changes = useGitStore((s) => s.changes);
   const { openFile, openDiff } = useViewerStore();
   const [treeData, setTreeData] = useState<TreeDataNode[]>([]);
+  // 已加载过的目录（含根 "."）。fs 变化时全部重新拉取，新增/删除的文件就能出现
+  const loadedDirs = useRef<Set<string>>(new Set(["."]));
+
+  const rebuild = useCallback(async () => {
+    const keys = [...loadedDirs.current];
+    const childrenMap = new Map<string, TreeDataNode[]>();
+    await Promise.all(
+      keys.map(async (key) => {
+        try {
+          childrenMap.set(key, toTreeNodes(await readDirTree(key)));
+        } catch {
+          loadedDirs.current.delete(key); // 目录已被删除
+        }
+      }),
+    );
+    const build = (nodes: TreeDataNode[]): TreeDataNode[] =>
+      nodes.map((node) => {
+        const kids = childrenMap.get(String(node.key));
+        return kids ? { ...node, children: build(kids) } : node;
+      });
+    setTreeData(build(childrenMap.get(".") ?? []));
+  }, []);
 
   // 文件状态表 + 含改动的目录前缀集合（目录上显示圆点）
   const { fileStatus, dirtyDirs } = useMemo(() => {
@@ -67,22 +75,26 @@ export function Explorer({ view }: { view: "files" | "changes" }) {
     return { fileStatus, dirtyDirs };
   }, [changes]);
 
+  // 切换工作区：重置已加载集合并拉根目录
   useEffect(() => {
-    readDirTree(".")
-      .then((nodes) => setTreeData(toTreeNodes(nodes)))
-      .catch((e) => message.error(String(e)));
-  }, [version, message]);
+    loadedDirs.current = new Set(["."]);
+    void rebuild().catch((e) => message.error(String(e)));
+  }, [version, message, rebuild]);
+
+  // 文件变化（agent 新建/删除文件、外部编辑）→ 刷新所有已加载目录
+  useEffect(() => {
+    const unlisten = listen("workspace-fs-changed", () => void rebuild());
+    return () => {
+      void unlisten.then((fn) => fn());
+    };
+  }, [rebuild]);
 
   const loadChildren = useCallback(
     async (node: TreeDataNode) => {
-      try {
-        const children = await readDirTree(String(node.key));
-        setTreeData((tree) => attachChildren(tree, String(node.key), toTreeNodes(children)));
-      } catch (e) {
-        message.error(String(e));
-      }
+      loadedDirs.current.add(String(node.key));
+      await rebuild().catch((e) => message.error(String(e)));
     },
-    [message],
+    [message, rebuild],
   );
 
   const openChange = useCallback(

@@ -134,7 +134,7 @@ export function ChatView() {
               submit();
             }
           }}
-          placeholder="输入消息，Enter 发送，Shift+Enter 换行"
+          placeholder="输入消息，Enter 发送；/ 查看快捷命令（/tools /skills /mcp）"
           autoSize={{ minRows: 1, maxRows: 6 }}
           disabled={streaming}
         />
