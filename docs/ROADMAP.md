@@ -88,6 +88,15 @@ M1 是最薄的端到端打通，后面每步在其上叠加。
 
 > v1 期间为此预留的接缝：tool registry 多来源设计（M2）、system prompt 分段组装（M2）。
 
+## v3 候选（2026-06-12 用户提出）
+
+- **三栏布局重构** ✅（随手做了）：左=项目+会话分组，中=交互区，右=文件/改动；
+  浏览器面板位置已预留（中栏与右栏之间，可折叠）
+- **subagent**：主 agent 把子任务派给独立上下文的子 agent（并行探索/隔离大输出）
+- **createTeam / 多 agent 协作**：多个 agent 分工 + 协调者模式
+- **browser-use**：内嵌浏览器面板（预览 localhost、agent 可视化操作网页）；
+  现阶段过渡方案是 browser 技能（agent-browser CLI）
+
 ## 里程碑之外的纪律
 
 - 每个 M 结束打 git tag（v0.1 ~ v0.6），README 的功能清单同步更新
