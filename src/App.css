@@ -407,6 +407,31 @@ body {
   font-size: 13px;
 }
 
+.chat-bubble-assistant table {
+  border-collapse: collapse;
+  margin: 8px 0;
+  font-size: 13px;
+  display: block;
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+.chat-bubble-assistant th,
+.chat-bubble-assistant td {
+  border: 1px solid #e8e8e8;
+  padding: 5px 10px;
+  text-align: left;
+}
+
+.chat-bubble-assistant th {
+  background: #fafafa;
+  font-weight: 600;
+}
+
+.chat-bubble-assistant tr:nth-child(even) td {
+  background: #fcfcfc;
+}
+
 .chat-input {
   display: flex;
   align-items: flex-end;

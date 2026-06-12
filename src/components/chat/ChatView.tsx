@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Alert, Button, Empty, Input, Tooltip } from "antd";
 import { ClearOutlined, SendOutlined } from "@ant-design/icons";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { useChatStore } from "../../stores/chatStore";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
 import { ApprovalCard } from "./ApprovalCard";
@@ -42,7 +43,9 @@ export function ChatView() {
             <div key={index} className={`chat-bubble chat-bubble-${item.role}`}>
               {item.reasoning && <div className="chat-reasoning">{item.reasoning}</div>}
               {item.role === "assistant" ? (
-                <ReactMarkdown>{item.content || (item.reasoning ? "" : "…")}</ReactMarkdown>
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  {item.content || (item.reasoning ? "" : "…")}
+                </ReactMarkdown>
               ) : (
                 item.content
               )}
