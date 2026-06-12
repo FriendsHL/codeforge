@@ -52,15 +52,31 @@ body {
   background: #fff;
 }
 
+/* 视觉上是 1px 边线，命中区域 7px（负 margin 扩展），不产生"间隔"感 */
 .resize-handle {
-  width: 5px;
+  width: 7px;
+  margin: 0 -3px;
+  z-index: 5;
   flex-shrink: 0;
   cursor: col-resize;
-  background: #f0f0f0;
-  transition: background 0.15s;
+  position: relative;
+  background: transparent;
 }
 
-.resize-handle:hover {
+.resize-handle::after {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: #e8e8e8;
+  transition: all 0.15s;
+}
+
+.resize-handle:hover::after {
+  left: 2px;
+  width: 3px;
   background: #d46b08;
 }
 
@@ -497,6 +513,7 @@ body.resizing {
   flex-direction: column;
   flex: 1;
   min-height: 0;
+  min-width: 320px;
 }
 
 .chat-messages {

@@ -17,7 +17,7 @@ import { hasApiKey } from "./lib/ipc";
 import { useChatStore } from "./stores/chatStore";
 import { useGitStore } from "./stores/gitStore";
 import { useSessionStore } from "./stores/sessionStore";
-import { useUiStore } from "./stores/uiStore";
+import { LIMITS, useUiStore } from "./stores/uiStore";
 import { useViewerStore } from "./stores/viewerStore";
 import { useWorkspaceStore } from "./stores/workspaceStore";
 import "./App.css";
@@ -87,7 +87,10 @@ function App() {
             </Tooltip>
           </header>
           <div className="app-body">
-            <div style={{ width: widths.left, flexShrink: 0, display: "flex" }}>
+            {/* 面板可随窗口变窄收缩到各自 min（flexShrink:1），中栏始终自适应 */}
+            <div
+              style={{ width: widths.left, minWidth: LIMITS.left.min, flexShrink: 1, display: "flex" }}
+            >
               <ProjectsPanel />
             </div>
             <ResizeHandle onDelta={(dx) => resize("left", dx, true)} />
@@ -95,7 +98,14 @@ function App() {
             {viewerOpen && (
               <>
                 <ResizeHandle onDelta={(dx) => resize("viewer", dx, false)} />
-                <div style={{ width: widths.viewer, flexShrink: 0, display: "flex" }}>
+                <div
+                  style={{
+                    width: widths.viewer,
+                    minWidth: LIMITS.viewer.min,
+                    flexShrink: 1,
+                    display: "flex",
+                  }}
+                >
                   <ViewerPanel />
                 </div>
               </>
@@ -103,7 +113,14 @@ function App() {
             {root && (
               <>
                 <ResizeHandle onDelta={(dx) => resize("right", dx, false)} />
-                <div style={{ width: widths.right, flexShrink: 0, display: "flex" }}>
+                <div
+                  style={{
+                    width: widths.right,
+                    minWidth: LIMITS.right.min,
+                    flexShrink: 1,
+                    display: "flex",
+                  }}
+                >
                   <RightPanel />
                 </div>
               </>

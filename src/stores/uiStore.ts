@@ -1,10 +1,10 @@
 import { create } from "zustand";
 
 // 三个可调宽面板：左（项目/会话）、查看器、右（文件/改动）。中栏 flex 自适应。
-const LIMITS = {
-  left: { min: 180, max: 420, default: 240 },
-  viewer: { min: 320, max: 1000, default: 520 },
-  right: { min: 200, max: 520, default: 280 },
+export const LIMITS = {
+  left: { min: 170, max: 420, default: 240 },
+  viewer: { min: 300, max: 1000, default: 500 },
+  right: { min: 190, max: 520, default: 270 },
 } as const;
 
 export type PanelKey = keyof typeof LIMITS;
