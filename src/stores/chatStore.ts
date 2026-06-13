@@ -155,6 +155,8 @@ interface ChatState {
   error: string | null;
   model: string;
   terminalOpen: boolean;
+  mode: import("../lib/ipc").AgentMode;
+  setMode: (mode: import("../lib/ipc").AgentMode) => void;
   currentSessionId: number | null;
   /** 本会话累计输出 tokens（仅 UI 提示用） */
   sessionTokens: number;
@@ -174,6 +176,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   error: null,
   model: localStorage.getItem(MODEL_STORAGE_KEY) ?? DEFAULT_MODEL,
   terminalOpen: false,
+  mode: (localStorage.getItem("codeforge.mode") as import("../lib/ipc").AgentMode) || "ask",
   currentSessionId: null,
   sessionTokens: 0,
   contextTokens: null,
@@ -181,6 +184,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setModel: (model) => {
     localStorage.setItem(MODEL_STORAGE_KEY, model);
     set({ model });
+  },
+
+  setMode: (mode) => {
+    localStorage.setItem("codeforge.mode", mode);
+    set({ mode });
   },
 
   send: async (text, mentions = []) => {
@@ -354,7 +362,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     try {
       const { provider, model: modelId } = splitModelValue(model);
-      await sendMessage(provider, modelId, history, get().currentSessionId, (event) => {
+      await sendMessage(provider, modelId, history, get().currentSessionId, get().mode, (event) => {
         switch (event.type) {
           case "textDelta":
             appendToAssistant({ content: event.text });

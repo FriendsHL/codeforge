@@ -51,16 +51,19 @@ export interface FilePreview {
   truncated: boolean;
 }
 
+export type AgentMode = "ask" | "auto" | "plan";
+
 export async function sendMessage(
   provider: string,
   model: string,
   messages: ChatMessage[],
   sessionId: number | null,
+  mode: AgentMode,
   onEvent: (event: AgentEvent) => void,
 ): Promise<void> {
   const channel = new Channel<AgentEvent>();
   channel.onmessage = onEvent;
-  await invoke("send_message", { provider, model, messages, sessionId, channel });
+  await invoke("send_message", { provider, model, messages, sessionId, mode, channel });
 }
 
 export const setApiKey = (key: string) => invoke<void>("set_api_key", { key });

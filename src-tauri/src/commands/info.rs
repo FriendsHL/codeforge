@@ -41,7 +41,7 @@ pub fn list_capabilities(
 
     let mut tools: Vec<CapabilityItem> = state
         .tools
-        .specs(workspace.is_some())
+        .specs(workspace.is_some(), false)
         .into_iter()
         .map(|s| CapabilityItem { name: s.name, description: s.description })
         .collect();

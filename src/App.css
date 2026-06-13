@@ -951,13 +951,26 @@ body.resizing {
   white-space: nowrap;
 }
 
+.chat-mode-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 16px 0;
+  background: #fff;
+}
+
+.chat-mode-hint {
+  font-size: 12px;
+  color: #999;
+}
+
 .chat-input {
   display: flex;
   align-items: flex-end;
   gap: 8px;
-  padding: 12px 16px;
+  padding: 10px 16px 12px;
   background: #fff;
-  border-top: 1px solid #f0f0f0;
+  border-top: none;
 }
 
 .chat-input-box {

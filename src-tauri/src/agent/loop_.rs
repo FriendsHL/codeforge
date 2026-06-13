@@ -22,6 +22,27 @@ const EVENT_OUTPUT_PREVIEW_CHARS: usize = 2000;
 const SUBAGENT_TOOL: &str = "spawn_subagents";
 const MAX_SUBAGENTS: usize = 4;
 
+/// 交互模式：决定审批策略和可用工具集
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum AgentMode {
+    /// 默认：写文件/跑命令都要审批
+    Ask,
+    /// 自动：非危险操作直接放行，仅危险动作(rm -rf 等)弹审批
+    Auto,
+    /// 计划：禁用一切写/执行工具，只读+调研，产出方案
+    Plan,
+}
+
+impl AgentMode {
+    pub fn parse(s: &str) -> Self {
+        match s {
+            "auto" => AgentMode::Auto,
+            "plan" => AgentMode::Plan,
+            _ => AgentMode::Ask,
+        }
+    }
+}
+
 /// 一次 agent 运行的环境（主/子 agent 共享，子 agent 直接复用引用）
 pub struct AgentCtx {
     pub endpoint: Endpoint,
@@ -30,6 +51,8 @@ pub struct AgentCtx {
     pub registry: Arc<ToolRegistry>,
     pub workspace: Option<PathBuf>,
     pub permissions: Arc<PermissionManager>,
+    /// 交互模式
+    pub mode: AgentMode,
     /// 停止按钮：置 true 后流式读取、loop 迭代、子 agent 都会尽快收尾
     pub cancel: Arc<std::sync::atomic::AtomicBool>,
     /// provider id（trace 的 gen_ai.system 属性）
@@ -174,9 +197,11 @@ async fn loop_body(
     run_span: Option<&str>,
 ) -> Result<String, String> {
     {
-        let base_system = prompt::build_system_prompt(ctx.workspace.as_deref(), !is_main);
-        let mut tools = ctx.registry.specs(ctx.workspace.is_some());
-        if is_main {
+        let plan_only = ctx.mode == AgentMode::Plan;
+        let base_system = prompt::build_system_prompt(ctx.workspace.as_deref(), !is_main, ctx.mode);
+        let mut tools = ctx.registry.specs(ctx.workspace.is_some(), plan_only);
+        // plan 模式不派子 agent（子 agent 会绕过工具过滤去执行写操作）
+        if is_main && !plan_only {
             tools.push(subagent_spec());
         }
 
@@ -478,7 +503,12 @@ async fn execute_tool(
             .map_err(|e| format!("工具执行崩溃: {e}"))??
     };
     if let Some(plan) = plan {
-        if !ctx.permissions.is_allow_all() {
+        // auto 模式：非危险操作直接放行，仅危险动作弹审批；ask 模式：都弹（会话级"全部允许"除外）
+        let needs_approval = match ctx.mode {
+            AgentMode::Auto => plan.danger.is_some(),
+            _ => true,
+        };
+        if needs_approval && !ctx.permissions.is_allow_all() {
             // 先注册再发事件，避免决议先于等待到达的竞态
             let rx = ctx.permissions.register(request_id);
             on_event(AgentEvent::PermissionAsk {
@@ -601,6 +631,7 @@ mod tests {
             registry: Arc::new(ToolRegistry::builtin()),
             workspace,
             permissions: Arc::new(PermissionManager::default()),
+            mode: AgentMode::Ask,
             cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             provider: "ark".into(),
             trace: None,

@@ -41,6 +41,11 @@ pub trait Tool: Send + Sync {
     fn affected_paths(&self, _input: &Value) -> Vec<String> {
         Vec::new()
     }
+    /// 是否会改动工作区/系统状态（写文件、跑命令、MCP）。plan 模式下这类工具被禁用。
+    /// 默认 false（只读工具）；写/执行工具覆盖为 true。
+    fn is_mutating(&self) -> bool {
+        false
+    }
 }
 
 pub struct ToolRegistry {
@@ -78,11 +83,13 @@ impl ToolRegistry {
         }
     }
 
-    /// 工具声明列表；未打开工作区时只暴露不依赖工作区的工具
-    pub fn specs(&self, has_workspace: bool) -> Vec<ToolSpec> {
+    /// 工具声明列表；未打开工作区时只暴露不依赖工作区的工具；
+    /// plan 模式(plan_only=true)下隐藏所有会改动状态的工具
+    pub fn specs(&self, has_workspace: bool, plan_only: bool) -> Vec<ToolSpec> {
         self.tools
             .iter()
             .filter(|t| has_workspace || !t.needs_workspace())
+            .filter(|t| !plan_only || !t.is_mutating())
             .map(|t| t.spec())
             .collect()
     }

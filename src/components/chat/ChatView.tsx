@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Alert, App, Button, Empty, Input, Tag, Tooltip } from "antd";
+import { Alert, App, Button, Empty, Input, Segmented, Tag, Tooltip } from "antd";
 import { ClearOutlined, SendOutlined, StopOutlined } from "@ant-design/icons";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -53,7 +53,7 @@ function workingLabel(items: ChatItem[]): string {
 }
 
 export function ChatView() {
-  const { items, streaming, error, send, queue, clear, terminalOpen, sessionTokens, contextTokens } =
+  const { items, streaming, error, send, queue, clear, terminalOpen, sessionTokens, contextTokens, mode, setMode } =
     useChatStore();
   const workspaceName = useWorkspaceStore((s) => s.name);
   const hasWorkspace = useWorkspaceStore((s) => s.root !== null);
@@ -189,6 +189,25 @@ export function ChatView() {
           ))}
         </div>
       )}
+
+      <div className="chat-mode-bar">
+        <Segmented
+          size="small"
+          value={mode}
+          onChange={(v) => setMode(v as "ask" | "auto" | "plan")}
+          disabled={streaming}
+          options={[
+            { label: "询问", value: "ask" },
+            { label: "自动", value: "auto" },
+            { label: "计划", value: "plan" },
+          ]}
+        />
+        <span className="chat-mode-hint">
+          {mode === "ask" && "写文件/命令需逐个确认"}
+          {mode === "auto" && "自动执行，仅危险操作需确认"}
+          {mode === "plan" && "只读+调研，产出方案不动手"}
+        </span>
+      </div>
 
       <div className="chat-input">
         <div className="chat-input-box">

@@ -67,6 +67,10 @@ impl Tool for WriteFileTool {
         input["path"].as_str().map(|p| vec![p.to_string()]).unwrap_or_default()
     }
 
+    fn is_mutating(&self) -> bool {
+        true
+    }
+
     fn run(&self, workspace: &Path, input: &Value) -> Result<String, String> {
         let (path, rel, old, new) = write_file_parts(workspace, input)?;
         if let Some(parent) = path.parent() {
@@ -142,6 +146,10 @@ impl Tool for EditFileTool {
 
     fn affected_paths(&self, input: &Value) -> Vec<String> {
         input["path"].as_str().map(|p| vec![p.to_string()]).unwrap_or_default()
+    }
+
+    fn is_mutating(&self) -> bool {
+        true
     }
 
     fn run(&self, workspace: &Path, input: &Value) -> Result<String, String> {

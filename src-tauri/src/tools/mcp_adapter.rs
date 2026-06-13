@@ -54,6 +54,10 @@ impl Tool for McpToolAdapter {
     }
 
     /// MCP 工具自带执行环境，不依赖工作区
+    fn is_mutating(&self) -> bool {
+        true // 外部 MCP 工具副作用未知，按写操作对待
+    }
+
     fn needs_workspace(&self) -> bool {
         false
     }

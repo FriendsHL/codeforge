@@ -51,6 +51,10 @@ impl Tool for BashTool {
         }))
     }
 
+    fn is_mutating(&self) -> bool {
+        true
+    }
+
     fn run(&self, workspace: &Path, input: &Value) -> Result<String, String> {
         self.run_streaming(workspace, input, &mut |_| {})
     }

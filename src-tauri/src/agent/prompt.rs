@@ -2,8 +2,27 @@
 
 use std::path::Path;
 
-pub fn build_system_prompt(workspace: Option<&Path>, is_subagent: bool) -> String {
+pub fn build_system_prompt(
+    workspace: Option<&Path>,
+    is_subagent: bool,
+    mode: crate::agent::loop_::AgentMode,
+) -> String {
+    use crate::agent::loop_::AgentMode;
     let mut sections: Vec<String> = Vec::new();
+
+    match mode {
+        AgentMode::Plan => sections.push(
+            "\
+【计划模式】当前禁止任何写文件/执行命令的操作（这些工具已不可用）。\
+只调研、读代码、分析，最终产出一份清晰可执行的方案（步骤、涉及文件、风险），等用户切换到执行模式后再动手。\
+不要假装已经改了代码。"
+                .into(),
+        ),
+        AgentMode::Auto => sections.push(
+            "【自动模式】你的常规写文件/命令会自动执行无需逐个确认；但危险操作仍会请用户确认。请稳妥行事。".into(),
+        ),
+        AgentMode::Ask => {}
+    }
 
     if is_subagent {
         sections.push(

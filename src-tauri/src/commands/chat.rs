@@ -18,11 +18,13 @@ pub async fn send_message(
     model: String,
     messages: Vec<ChatMessage>,
     session_id: Option<i64>,
+    mode: Option<String>,
     channel: Channel<AgentEvent>,
     app: tauri::AppHandle,
     state: State<'_, AppState>,
     mcp: State<'_, McpState>,
 ) -> Result<(), String> {
+    let mode = crate::agent::loop_::AgentMode::parse(mode.as_deref().unwrap_or("ask"));
     let endpoint = registry::resolve(&provider)?;
     let api_key = registry::api_key_for(&endpoint)?;
     let workspace = state.workspace.lock().unwrap().clone();
@@ -90,6 +92,7 @@ pub async fn send_message(
         registry: tool_registry,
         workspace,
         permissions,
+        mode,
         cancel: state.cancel.clone(),
         provider: provider.clone(),
         trace,
