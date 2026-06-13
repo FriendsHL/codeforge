@@ -105,6 +105,8 @@ export type ChatItem =
       output?: string;
       isError?: boolean;
       durationMs?: number;
+      checkpointId?: string | null;
+      reverted?: boolean;
       done: boolean;
     }
   | {
@@ -262,6 +264,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                       output: event.output,
                       isError: event.isError,
                       durationMs: event.durationMs,
+                      checkpointId: event.checkpointId,
                       done: true,
                     }
                   : item,

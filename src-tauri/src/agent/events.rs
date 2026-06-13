@@ -17,6 +17,8 @@ pub enum AgentEvent {
         output: String,
         is_error: bool,
         duration_ms: u64,
+        /// 该工具改动了文件时附带的检查点 id（前端据此显示"回滚"按钮）
+        checkpoint_id: Option<String>,
     },
     /// 副作用操作审批请求：前端弹 diff/命令，用户经 approve_permission 决议
     #[serde(rename_all = "camelCase")]

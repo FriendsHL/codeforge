@@ -38,6 +38,9 @@ pub struct AgentCtx {
     pub trace: Option<Arc<crate::trace::TraceWriter>>,
     /// agent 的任务清单（todo_write 维护，每轮作为 system-reminder 注入）
     pub todos: crate::tools::todo::TodoList,
+    /// 检查点存储位置 + 会话 id（无会话则不快照）
+    pub app_data: Option<PathBuf>,
+    pub session_id: Option<i64>,
 }
 
 fn is_cancelled(ctx: &AgentCtx) -> bool {
@@ -55,6 +58,36 @@ pub async fn run_agent_loop(
     loop_impl(ctx, history, on_event, String::new(), true, None)
         .await
         .map(|_| ())
+}
+
+/// 写文件类工具执行前拍快照，返回检查点 id。条件不满足（非写工具/无会话/无工作区）返回 None。
+fn maybe_capture_checkpoint(
+    ctx: &AgentCtx,
+    event_id: &str,
+    tool_name: &str,
+    input: &Value,
+) -> Option<String> {
+    let (app_data, session_id, workspace) = (
+        ctx.app_data.as_ref()?,
+        ctx.session_id?,
+        ctx.workspace.as_ref()?,
+    );
+    let tool = ctx.registry.get(tool_name)?;
+    let paths = tool.affected_paths(input);
+    if paths.is_empty() {
+        return None;
+    }
+    let checkpoint_id = ctx
+        .trace
+        .as_ref()
+        .map(|t| t.reserve_span_id())
+        .unwrap_or_else(|| format!("cp{}", crate::trace::now_unix_nanos()));
+    let label = format!("{tool_name} {}", paths.join(", "));
+    crate::checkpoint::capture(
+        app_data, session_id, &checkpoint_id, event_id, &label, workspace, &paths,
+    )
+    .ok()
+    .map(|_| checkpoint_id)
 }
 
 fn cap_chars(text: &str, limit: usize) -> String {
@@ -243,6 +276,9 @@ async fn loop_body(
                     input: input.clone(),
                 });
 
+                // 写文件类工具：执行前对将被改动的文件拍快照（用户拒绝时为 no-op 快照，无害）
+                let checkpoint_id = maybe_capture_checkpoint(ctx, &event_id, &call.name, &input);
+
                 let started = std::time::Instant::now();
                 let tool_start = crate::trace::now_unix_nanos();
                 let result = if call.name == SUBAGENT_TOOL {
@@ -258,6 +294,8 @@ async fn loop_body(
                     Ok(content) => (content, false),
                     Err(message) => (message, true),
                 };
+                // 仅当真正改动成功才把检查点暴露给前端（拒绝/失败的快照丢弃）
+                let checkpoint_id = if is_error { None } else { checkpoint_id };
 
                 if let Some(tracer) = &ctx.trace {
                     tracer.span(
@@ -280,6 +318,7 @@ async fn loop_body(
                     output: preview(&content),
                     is_error,
                     duration_ms: started.elapsed().as_millis() as u64,
+                    checkpoint_id,
                 });
                 history.push(HistoryItem::ToolResult {
                     call_id: call.id,
@@ -542,6 +581,8 @@ mod tests {
             provider: "ark".into(),
             trace: None,
             todos: Arc::new(std::sync::Mutex::new(Vec::new())),
+            app_data: None,
+            session_id: None,
         }
     }
 

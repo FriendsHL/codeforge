@@ -41,10 +41,11 @@ pub fn delete_session(
     state: State<'_, SessionState>,
 ) -> Result<(), String> {
     state.0.delete(id)?;
-    // 一并清理该会话的 trace
+    // 一并清理该会话的 trace 与检查点
     use tauri::Manager;
     if let Ok(dir) = app.path().app_data_dir() {
         crate::trace::remove_trace(&dir.join("traces"), id);
+        crate::checkpoint::remove_session(&dir, id);
     }
     Ok(())
 }

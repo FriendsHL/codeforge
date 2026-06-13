@@ -532,6 +532,12 @@ body.resizing {
   font-family: "SF Mono", Menlo, monospace;
 }
 
+.tool-card-revert {
+  color: #d46b08;
+  font-size: 12px;
+  padding: 0 6px;
+}
+
 .tool-card-output {
   max-height: 240px;
   overflow: auto;

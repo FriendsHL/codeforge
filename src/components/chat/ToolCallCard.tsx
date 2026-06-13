@@ -1,10 +1,13 @@
-import { Collapse, Spin, Tag } from "antd";
+import { App, Button, Collapse, Spin, Tag } from "antd";
 import {
   CheckCircleOutlined,
   CloseCircleOutlined,
   ToolOutlined,
+  UndoOutlined,
 } from "@ant-design/icons";
+import { revertCheckpoint } from "../../lib/ipc";
 import type { ChatItem } from "../../stores/chatStore";
+import { useChatStore } from "../../stores/chatStore";
 
 const TOOL_LABELS: Record<string, string> = {
   read_file: "读文件",
@@ -60,6 +63,7 @@ function summarizeInput(name: string, input: unknown): string {
 }
 
 export function ToolCallCard({ item }: { item: Extract<ChatItem, { kind: "tool" }> }) {
+  const { message, modal } = App.useApp();
   const status = !item.done ? (
     <Spin size="small" />
   ) : item.isError ? (
@@ -75,6 +79,34 @@ export function ToolCallCard({ item }: { item: Extract<ChatItem, { kind: "tool" 
         : `${item.durationMs}ms`
       : null;
 
+  const revert = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const sessionId = useChatStore.getState().currentSessionId;
+    if (sessionId === null || !item.checkpointId) return;
+    modal.confirm({
+      title: "回滚这次文件改动？",
+      content: `把「${summarizeInput(item.name, item.input)}」改动的文件恢复到改动前。`,
+      okText: "回滚",
+      okButtonProps: { danger: true },
+      cancelText: "取消",
+      onOk: async () => {
+        try {
+          const msg = await revertCheckpoint(sessionId, item.checkpointId!);
+          message.success(msg);
+          useChatStore.setState((s) => ({
+            items: s.items.map((i) =>
+              i.kind === "tool" && i.id === item.id ? { ...i, reverted: true } : i,
+            ),
+          }));
+        } catch (err) {
+          message.error(String(err));
+        }
+      },
+    });
+  };
+
+  const canRevert = item.done && !item.isError && item.checkpointId && !item.reverted;
+
   return (
     <Collapse
       size="small"
@@ -88,6 +120,18 @@ export function ToolCallCard({ item }: { item: Extract<ChatItem, { kind: "tool" 
               <Tag>{TOOL_LABELS[item.name] ?? item.name}</Tag>
               <code className="tool-card-summary">{summarizeInput(item.name, item.input)}</code>
               {duration && <span className="tool-card-duration">{duration}</span>}
+              {item.reverted && <Tag color="default">已回滚</Tag>}
+              {canRevert && (
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<UndoOutlined />}
+                  onClick={revert}
+                  className="tool-card-revert"
+                >
+                  回滚
+                </Button>
+              )}
               {status}
             </span>
           ),

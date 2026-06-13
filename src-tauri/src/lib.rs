@@ -1,4 +1,5 @@
 mod agent;
+mod checkpoint;
 mod commands;
 mod config;
 mod git;
@@ -64,6 +65,7 @@ pub fn run() {
             commands::chat::send_message,
             commands::chat::approve_permission,
             commands::chat::stop_generation,
+            commands::chat::revert_checkpoint,
             commands::settings::set_api_key,
             commands::settings::has_api_key,
             commands::settings::set_provider_key,

@@ -35,6 +35,10 @@ pub trait Tool: Send + Sync {
     ) -> Result<String, String> {
         self.run(workspace, input)
     }
+    /// 写文件类工具返回"本次将改动的相对路径"，供 loop 执行前拍快照；其他工具返回空
+    fn affected_paths(&self, _input: &Value) -> Vec<String> {
+        Vec::new()
+    }
 }
 
 pub struct ToolRegistry {

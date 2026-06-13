@@ -63,6 +63,10 @@ impl Tool for WriteFileTool {
         Ok(Some(ApprovalPlan { diff: unified_diff(&rel, &old, &new), summary: rel }))
     }
 
+    fn affected_paths(&self, input: &Value) -> Vec<String> {
+        input["path"].as_str().map(|p| vec![p.to_string()]).unwrap_or_default()
+    }
+
     fn run(&self, workspace: &Path, input: &Value) -> Result<String, String> {
         let (path, rel, old, new) = write_file_parts(workspace, input)?;
         if let Some(parent) = path.parent() {
@@ -134,6 +138,10 @@ impl Tool for EditFileTool {
     fn plan(&self, workspace: &Path, input: &Value) -> Result<Option<ApprovalPlan>, String> {
         let (_, rel, old, new) = edit_file_parts(workspace, input)?;
         Ok(Some(ApprovalPlan { diff: unified_diff(&rel, &old, &new), summary: rel }))
+    }
+
+    fn affected_paths(&self, input: &Value) -> Vec<String> {
+        input["path"].as_str().map(|p| vec![p.to_string()]).unwrap_or_default()
     }
 
     fn run(&self, workspace: &Path, input: &Value) -> Result<String, String> {

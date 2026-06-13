@@ -70,14 +70,13 @@ pub async fn send_message(
 
     state.cancel.store(false, std::sync::atomic::Ordering::SeqCst); // 新回合清掉旧的停止标志
 
-    // OTel 风格本地 trace：traces/<session_id>.jsonl（无会话时不记）
-    let trace = session_id.and_then(|sid| {
+    let app_data = {
         use tauri::Manager;
-        app.path()
-            .app_data_dir()
-            .ok()
-            .and_then(|dir| crate::trace::TraceWriter::open(&dir.join("traces"), sid).ok())
-            .map(Arc::new)
+        app.path().app_data_dir().ok()
+    };
+    // OTel 风格本地 trace：traces/<session_id>.jsonl（无会话时不记）
+    let trace = session_id.zip(app_data.as_ref()).and_then(|(sid, dir)| {
+        crate::trace::TraceWriter::open(&dir.join("traces"), sid).ok().map(Arc::new)
     });
 
     let ctx = AgentCtx {
@@ -91,6 +90,8 @@ pub async fn send_message(
         provider: provider.clone(),
         trace,
         todos,
+        app_data,
+        session_id,
     };
     let result = run_agent_loop(&ctx, history, &on_event).await;
 
@@ -198,6 +199,18 @@ async fn compact_history(
             Some("摘要压缩失败，已按旧策略截断最早消息".into()),
         ),
     }
+}
+
+/// 回滚某个检查点：把当时改动的文件恢复到改动前
+#[tauri::command]
+pub fn revert_checkpoint(
+    session_id: i64,
+    checkpoint_id: String,
+    app: tauri::AppHandle,
+) -> Result<String, String> {
+    use tauri::Manager;
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    crate::checkpoint::revert(&dir, session_id, &checkpoint_id)
 }
 
 /// 停止当前回合：流式读取/loop/子 agent 尽快收尾；挂起的审批按拒绝处理
