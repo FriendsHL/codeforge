@@ -22,6 +22,7 @@ const TOOL_LABELS: Record<string, string> = {
   bash: "执行命令",
   web_fetch: "抓网页",
   web_search: "搜索",
+  research_plan: "调研方法",
   spawn_subagents: "子agent团队",
   browser_open: "打开浏览器",
   todo_write: "更新任务清单",
@@ -49,6 +50,8 @@ function summarizeInput(name: string, input: unknown): string {
       return String(obj.url ?? "");
     case "web_search":
       return String(obj.query ?? "");
+    case "research_plan":
+      return String(obj.question ?? "");
     case "spawn_subagents": {
       const tasks = obj.tasks as { title?: string }[] | undefined;
       return (tasks ?? []).map((t) => t.title).filter(Boolean).join(" | ");

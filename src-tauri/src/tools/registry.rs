@@ -73,6 +73,7 @@ impl ToolRegistry {
                 Arc::new(super::bash::BashTool),
                 Arc::new(super::web::WebFetchTool),
                 Arc::new(super::web::WebSearchTool),
+                Arc::new(super::research::ResearchPlanTool),
             ],
         }
     }
