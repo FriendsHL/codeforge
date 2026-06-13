@@ -31,6 +31,8 @@ pub struct AppState {
     pub generating: Arc<std::sync::atomic::AtomicBool>,
     /// 生成中用户追加的消息队列，loop 每轮注入进 messages
     pub pending: Arc<Mutex<Vec<String>>>,
+    /// 异步团队任务注册表（spawn_team/team_status 共用，跨回合存活）
+    pub team: Arc<agent::team::TeamRegistry>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -70,6 +72,7 @@ pub fn run() {
             cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             generating: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             pending: Arc::new(Mutex::new(Vec::new())),
+            team: Arc::new(agent::team::TeamRegistry::default()),
         })
         .invoke_handler(tauri::generate_handler![
             commands::chat::send_message,

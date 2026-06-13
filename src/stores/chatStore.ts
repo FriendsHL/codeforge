@@ -11,6 +11,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { termWrite } from "../lib/terminal";
 import { useGitStore } from "./gitStore";
 import { useSessionStore } from "./sessionStore";
+import { useTeamStore } from "./teamStore";
 import { useTodoStore } from "./todoStore";
 import { useViewerStore } from "./viewerStore";
 
@@ -448,6 +449,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
               items.push({ kind: "notice", text: `🗜 ${event.note}` });
               return items;
             });
+            break;
+          case "teamUpdate":
+            useTeamStore.getState().set(event.tasks);
             break;
           case "usage":
             // 每次 LLM 调用上报一次：累加 session 总量与本轮花费，刷新上下文占用

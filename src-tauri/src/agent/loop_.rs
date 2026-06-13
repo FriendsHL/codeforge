@@ -20,6 +20,8 @@ const MAX_ITERATIONS: usize = 30;
 /// 工具结果回传前端展示时的截断长度（回填给模型的是全量）
 const EVENT_OUTPUT_PREVIEW_CHARS: usize = 2000;
 const SUBAGENT_TOOL: &str = "spawn_subagents";
+const SPAWN_TEAM_TOOL: &str = "spawn_team";
+const TEAM_STATUS_TOOL: &str = "team_status";
 const MAX_SUBAGENTS: usize = 4;
 
 /// 交互模式：决定审批策略和可用工具集
@@ -68,6 +70,11 @@ pub struct AgentCtx {
     pub pending: Arc<std::sync::Mutex<Vec<String>>>,
     /// 当前 agent 角色（会话驱动选中的，或子 agent 被指派的）；None=通用 agent
     pub role: Option<Arc<crate::agents::AgentRole>>,
+    /// 异步团队任务注册表（spawn_team/team_status 共用，跨回合存活）
+    pub team: Arc<crate::agent::team::TeamRegistry>,
+    /// 后台任务用的 'static 事件发射器（背景 agent 完成时推 TeamUpdate）；
+    /// 用通用闭包避免和 tauri 耦合。None=无前端通道（如测试）。
+    pub bg_events: Option<Arc<dyn Fn(AgentEvent) + Send + Sync>>,
 }
 
 impl AgentCtx {
@@ -90,6 +97,8 @@ impl AgentCtx {
             session_id: self.session_id,
             pending: self.pending.clone(),
             role,
+            team: self.team.clone(),
+            bg_events: self.bg_events.clone(),
         }
     }
 }
@@ -191,6 +200,50 @@ fn subagent_spec(workspace: Option<&std::path::Path>) -> ToolSpec {
     }
 }
 
+fn spawn_team_spec() -> ToolSpec {
+    ToolSpec {
+        name: SPAWN_TEAM_TOOL.into(),
+        description: "把若干任务派给后台 agent 并行执行，立即返回各自的 task_id（不阻塞）。\
+与 spawn_subagents 的区别：spawn_subagents 会等全部跑完才返回结果；spawn_team 是「派完就走」，\
+你可以先干别的，之后用 team_status 查进度/收结果。适合长耗时、可并行、不必马上要结果的活。\
+每个任务可指定 role（research/product/dev/review/test 等）。".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "tasks": {
+                    "type": "array",
+                    "description": "要派发的后台任务（1~8 个）",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "title": {"type": "string", "description": "任务短标题"},
+                            "prompt": {"type": "string", "description": "给后台 agent 的完整任务说明（它没有你的上下文）"},
+                            "role": {"type": "string", "description": "可选：以某角色执行"}
+                        },
+                        "required": ["title", "prompt"]
+                    }
+                }
+            },
+            "required": ["tasks"]
+        }),
+    }
+}
+
+fn team_status_spec() -> ToolSpec {
+    ToolSpec {
+        name: TEAM_STATUS_TOOL.into(),
+        description: "查询 spawn_team 派发的后台任务状态与结果。不带参数=查全部；带 ids 只查指定任务。\
+已完成的任务会带回它的书面汇报。派发后用它收口。".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "ids": {"type": "array", "items": {"type": "string"}, "description": "只查这些 task_id（省略=全部）"}
+            },
+            "required": []
+        }),
+    }
+}
+
 /// 返回本轮 agent 的最终文本（子 agent 用它作汇报）。
 /// 递归（子 agent 复用同一循环）需要 Box::pin。
 fn loop_impl<'a>(
@@ -256,9 +309,14 @@ async fn loop_body(
             tools.retain(|t| role.allows(&t.name));
         }
         // plan 模式不派子 agent；角色不允许 spawn_subagents 时也不给
-        let role_allows_subagents = ctx.role.as_ref().map(|r| r.allows(SUBAGENT_TOOL)).unwrap_or(true);
-        if is_main && !plan_only && role_allows_subagents {
+        let role_allows = |t: &str| ctx.role.as_ref().map(|r| r.allows(t)).unwrap_or(true);
+        if is_main && !plan_only && role_allows(SUBAGENT_TOOL) {
             tools.push(subagent_spec(ctx.workspace.as_deref()));
+        }
+        // 异步团队编排工具（仅主 agent、非 plan、角色允许时）
+        if is_main && !plan_only && role_allows(SPAWN_TEAM_TOOL) {
+            tools.push(spawn_team_spec());
+            tools.push(team_status_spec());
         }
 
         let mut final_text = String::new();
@@ -499,6 +557,14 @@ async fn execute_call(
         } else {
             Err("子 agent 不允许再派发子 agent".into())
         }
+    } else if call.name == SPAWN_TEAM_TOOL {
+        if is_main {
+            spawn_team(ctx, &input, on_event)
+        } else {
+            Err("子 agent 不允许再派发团队任务".into())
+        }
+    } else if call.name == TEAM_STATUS_TOOL {
+        Ok(team_status(ctx, &input, on_event))
     } else {
         execute_tool(ctx, &event_id, &call.name, input.clone(), on_event).await
     };
@@ -615,6 +681,103 @@ async fn run_subagents<'a>(
         report.push_str(&format!("## 子任务: {title}\n{body}\n\n"));
     }
     Ok(report.trim_end().to_string())
+}
+
+/// 异步派发后台团队任务：立即返回 task_id，不阻塞。后台 agent 完成后写注册表并推 TeamUpdate。
+fn spawn_team(ctx: &AgentCtx, input: &Value, on_event: &EventSink<'_>) -> Result<String, String> {
+    let tasks = input["tasks"].as_array().ok_or("缺少 tasks 参数")?;
+    if tasks.is_empty() || tasks.len() > 8 {
+        return Err("tasks 数量需在 1~8 之间".into());
+    }
+
+    let mut lines = Vec::new();
+    for t in tasks {
+        let title = t["title"].as_str().ok_or("子任务缺少 title")?.to_string();
+        let prompt = t["prompt"].as_str().ok_or("子任务缺少 prompt")?.to_string();
+        let role_name = t["role"].as_str().filter(|r| !r.is_empty()).map(str::to_string);
+
+        let id = ctx.team.next_id();
+        ctx.team.start(&id, &title, role_name.clone());
+
+        // 后台 agent 用独立 owned 上下文（'static），角色无效则退回通用
+        let role = role_name
+            .as_deref()
+            .and_then(|n| crate::agents::resolve(ctx.workspace.as_deref(), n))
+            .map(Arc::new);
+        // 后台 agent 无交互审批通道：强制 Auto 模式，否则遇到写操作会永久阻塞在审批等待。
+        // （危险操作仍会触发审批——背景任务里应避免，属 v1 已知限制。）
+        let mut child = ctx.child_with_role(role);
+        child.mode = AgentMode::Auto;
+        let team = ctx.team.clone();
+        let bg = ctx.bg_events.clone();
+        let id_for_task = id.clone();
+
+        tokio::spawn(async move {
+            // 后台 agent 的内部事件不进主会话流（避免与主 agent 输出交错）
+            let quiet = |_e: AgentEvent| {};
+            let result = loop_impl(
+                &child,
+                vec![HistoryItem::User(prompt)],
+                &quiet,
+                format!("team-{id_for_task}-"),
+                false,
+                None,
+            )
+            .await;
+            team.finish(&id_for_task, result);
+            // 完成即刷新任务看板
+            if let Some(emit) = &bg {
+                emit(AgentEvent::TeamUpdate { tasks: team.snapshot() });
+            }
+        });
+
+        let role_tag = role_name.as_deref().map(|r| format!(" [{r}]")).unwrap_or_default();
+        lines.push(format!("- {id}: {title}{role_tag}"));
+    }
+
+    // 初始看板刷新
+    on_event(AgentEvent::TeamUpdate { tasks: ctx.team.snapshot() });
+
+    Ok(format!(
+        "已派发 {} 个后台任务，正在并行执行：\n{}\n\n用 team_status 查询进度与结果（不必马上查，可以先做别的）。",
+        tasks.len(),
+        lines.join("\n")
+    ))
+}
+
+/// 查询后台团队任务状态/结果，并刷新看板
+fn team_status(ctx: &AgentCtx, input: &Value, on_event: &EventSink<'_>) -> String {
+    let records = match input["ids"].as_array() {
+        Some(arr) => {
+            let ids: Vec<String> =
+                arr.iter().filter_map(|v| v.as_str().map(String::from)).collect();
+            ctx.team.get(&ids)
+        }
+        None => ctx.team.snapshot(),
+    };
+    on_event(AgentEvent::TeamUpdate { tasks: ctx.team.snapshot() });
+
+    if records.is_empty() {
+        return "当前没有后台团队任务。".into();
+    }
+    let body = records
+        .iter()
+        .map(|r| {
+            let status = match r.status {
+                crate::agent::team::TaskStatus::Running => "运行中",
+                crate::agent::team::TaskStatus::Done => "已完成",
+                crate::agent::team::TaskStatus::Failed => "失败",
+            };
+            let role = r.role.as_deref().map(|x| format!(" [{x}]")).unwrap_or_default();
+            match &r.result {
+                Some(res) => format!("### {} {}{} — {}\n{}", r.id, r.title, role, status, res),
+                None => format!("### {} {}{} — {}", r.id, r.title, role, status),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    let running = ctx.team.running_count();
+    format!("团队任务（{running} 个运行中）：\n\n{body}")
 }
 
 async fn call_llm(
@@ -901,7 +1064,90 @@ mod tests {
             session_id: None,
             pending: Arc::new(std::sync::Mutex::new(Vec::new())),
             role,
+            team: Arc::new(crate::agent::team::TeamRegistry::default()),
+            bg_events: None,
         }
+    }
+
+    /// 无 key 的离线 ctx（不触网，仅验证编排管线本身）
+    fn offline_ctx() -> AgentCtx {
+        let endpoint = registry::resolve("ark").unwrap();
+        AgentCtx {
+            endpoint,
+            api_key: String::new(),
+            model: "doubao-seed-2.0-pro".into(),
+            registry: Arc::new(ToolRegistry::builtin()),
+            workspace: None,
+            permissions: Arc::new(PermissionManager::default()),
+            mode: AgentMode::Auto,
+            cancel: Arc::new(std::sync::atomic::AtomicBool::new(true)), // 置 true：后台 loop 立刻收尾，不真跑
+            provider: "ark".into(),
+            trace: None,
+            todos: Arc::new(std::sync::Mutex::new(Vec::new())),
+            app_data: None,
+            session_id: None,
+            pending: Arc::new(std::sync::Mutex::new(Vec::new())),
+            role: None,
+            team: Arc::new(crate::agent::team::TeamRegistry::default()),
+            bg_events: None,
+        }
+    }
+
+    /// 功能验证：spawn_team 立即登记任务、返回 id、刷新看板（不阻塞、不依赖 LLM）
+    #[tokio::test]
+    async fn spawn_team_registers_and_returns_ids() {
+        let ctx = offline_ctx();
+        let board_updates = Arc::new(std::sync::Mutex::new(0usize));
+        let bu = board_updates.clone();
+        let sink = move |e: AgentEvent| {
+            if let AgentEvent::TeamUpdate { tasks } = e {
+                let _ = tasks;
+                *bu.lock().unwrap() += 1;
+            }
+        };
+        let input = serde_json::json!({"tasks":[
+            {"title":"查A","prompt":"调查 A"},
+            {"title":"审B","prompt":"审查 B","role":"review"}
+        ]});
+        let out = spawn_team(&ctx, &input, &sink).unwrap();
+        assert!(out.contains("t0") && out.contains("t1"), "应返回 task_id：{out}");
+
+        let snap = ctx.team.snapshot();
+        assert_eq!(snap.len(), 2, "两个任务应立即登记");
+        assert_eq!(snap[0].title, "查A");
+        assert_eq!(snap[1].role.as_deref(), Some("review"));
+        assert!(*board_updates.lock().unwrap() >= 1, "应至少刷新一次看板");
+
+        // team_status 能查到这些任务
+        let status = team_status(&ctx, &serde_json::json!({}), &|_e| {});
+        assert!(status.contains("查A") && status.contains("审B"));
+    }
+
+    /// 端到端 live 验证：spawn_team 真的在后台跑通一个 agent 并回填结果。
+    /// 用多线程 runtime——后台 agent 的阻塞 I/O 不会饿死轮询计时器。
+    /// cargo test live_team -- --ignored --nocapture
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[ignore]
+    async fn live_team_runs_background_task() {
+        let ctx = ark_ctx(None);
+        let input = serde_json::json!({"tasks":[
+            {"title":"算术","prompt":"1+1 等于几？只回答阿拉伯数字，不要任何解释。"}
+        ]});
+        let dispatched = spawn_team(&ctx, &input, &|_e| {}).unwrap();
+        println!(">> {dispatched}");
+
+        // 轮询直到后台任务收尾（最多 ~30s）
+        for _ in 0..60 {
+            if ctx.team.running_count() == 0 {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        }
+        let snap = ctx.team.snapshot();
+        println!(">> 任务结果: {:?}", snap);
+        assert_eq!(snap.len(), 1);
+        assert_eq!(snap[0].status, crate::agent::team::TaskStatus::Done, "后台任务应完成");
+        assert!(snap[0].result.as_ref().unwrap().contains('2'), "结果应包含 2");
     }
 
     /// 功能验证：review 角色在执行期真的拦截 edit_file（不止是 spec 过滤）
@@ -950,6 +1196,8 @@ mod tests {
             session_id: None,
             pending: Arc::new(std::sync::Mutex::new(Vec::new())),
             role: None,
+            team: Arc::new(crate::agent::team::TeamRegistry::default()),
+            bg_events: None,
         }
     }
 

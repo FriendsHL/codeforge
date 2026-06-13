@@ -12,6 +12,7 @@ import { ApprovalCard } from "./ApprovalCard";
 import { MentionPicker } from "./MentionPicker";
 import { SubagentGroup } from "./SubagentGroup";
 import { ThinkingCard } from "./ThinkingCard";
+import { TeamPanel } from "./TeamPanel";
 import { TodoPanel } from "./TodoPanel";
 import { ToolCallCard } from "./ToolCallCard";
 
@@ -245,6 +246,7 @@ export function ChatView() {
         {error && <Alert type="error" message={error} showIcon />}
       </div>
 
+      <TeamPanel />
       <TodoPanel />
 
       {(sessionTokens > 0 || sessionInputTokens > 0 || contextTokens !== null) && (

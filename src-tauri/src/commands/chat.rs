@@ -73,6 +73,14 @@ pub async fn send_message(
         let _ = channel.send(event);
     };
 
+    // 后台团队任务用的 'static 事件发射器（克隆 channel，背景 agent 完成后推 TeamUpdate）
+    let bg_events: Arc<dyn Fn(AgentEvent) + Send + Sync> = {
+        let ch = channel.clone();
+        Arc::new(move |ev| {
+            let _ = ch.send(ev);
+        })
+    };
+
     // 跨轮压缩：超过阈值时把早前对话交给便宜模型摘要；失败则退回硬截断
     let history = match compact_history(&endpoint, &api_key, &provider, &state.cancel, raw_history).await {
         (history, Some(note)) => {
@@ -111,6 +119,8 @@ pub async fn send_message(
         session_id,
         pending: state.pending.clone(),
         role,
+        team: state.team.clone(),
+        bg_events: Some(bg_events),
     };
     let result = run_agent_loop(&ctx, history, &on_event).await;
     state.generating.store(false, std::sync::atomic::Ordering::SeqCst);

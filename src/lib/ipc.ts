@@ -34,6 +34,16 @@ export type AgentEvent =
     }
   | { type: "contextCompacted"; note: string }
   | {
+      type: "teamUpdate";
+      tasks: {
+        id: string;
+        title: string;
+        role: string | null;
+        status: "running" | "done" | "failed";
+        result: string | null;
+      }[];
+    }
+  | {
       type: "usage";
       callInput: number;
       callOutput: number;

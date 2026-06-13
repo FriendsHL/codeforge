@@ -54,6 +54,9 @@ pub enum AgentEvent {
     /// 上下文压缩发生时的提示（前端显示为系统注记）
     #[serde(rename_all = "camelCase")]
     ContextCompacted { note: String },
+    /// 团队任务快照更新（前端任务看板据此刷新）
+    #[serde(rename_all = "camelCase")]
+    TeamUpdate { tasks: Vec<crate::agent::team::TaskRecord> },
     #[serde(rename_all = "camelCase")]
     Error { message: String },
 }

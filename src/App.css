@@ -894,6 +894,59 @@ body.resizing {
   font-size: 12.5px;
 }
 
+.team-panel {
+  margin: 4px 16px 0;
+  border: 1px solid #bae0ff;
+  border-radius: 8px;
+  background: #f5fbff;
+  font-size: 12.5px;
+}
+
+.team-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  cursor: pointer;
+  user-select: none;
+  font-weight: 600;
+  color: #0958d9;
+}
+
+.team-progress {
+  margin-left: auto;
+  color: #999;
+  font-weight: 400;
+}
+
+.team-body {
+  padding: 2px 10px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.team-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.team-item-title {
+  flex: 0 1 auto;
+}
+
+.team-item-result {
+  color: #1677ff;
+  cursor: help;
+  margin-left: auto;
+}
+
+[data-theme="dark"] .team-panel {
+  background: #11212e;
+  border-color: #15395b;
+}
+
 .todo-header {
   display: flex;
   align-items: center;
