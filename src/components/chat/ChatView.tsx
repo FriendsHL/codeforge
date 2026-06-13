@@ -204,8 +204,8 @@ export function ChatView() {
             }}
             placeholder={
               hasWorkspace
-                ? "输入消息，Enter 发送；@ 引用文件；/ 查看快捷命令"
-                : "输入消息，Enter 发送；/ 查看快捷命令（/tools /skills /mcp）"
+                ? "输入消息，Enter 发送；@ 引用文件；/help 查看快捷命令"
+                : "输入消息，Enter 发送；/help 查看快捷命令"
             }
             autoSize={{ minRows: 1, maxRows: 6 }}
             disabled={streaming}

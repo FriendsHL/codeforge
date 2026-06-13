@@ -16,6 +16,10 @@ const SLASH_HELP = `可用快捷命令：
 - \`/tools\` 当前可用工具清单
 - \`/skills\` 当前已装技能
 - \`/mcp\` MCP server 连接状态
+- \`/model [名称]\` 查看/切换模型
+- \`/compact\` 手动压缩当前会话
+- \`/trace\` 本会话的 token/工具耗时统计
+- \`/clear\` 开一个新会话
 - \`/help\` 本帮助`;
 
 /** 本地快捷命令（不经过 LLM）。返回 null 表示不是已知命令 */
@@ -53,6 +57,56 @@ async function runSlashCommand(text: string): Promise<string | null> {
     default:
       return cmd.startsWith("/") ? `未知命令 \`${cmd}\`\n\n${SLASH_HELP}` : null;
   }
+}
+
+interface SpanRow {
+  name: string;
+  durationMs: number;
+  isError: boolean;
+}
+interface TraceSummaryData {
+  turns: number;
+  llmCalls: number;
+  inputTokens: number;
+  outputTokens: number;
+  toolCalls: number;
+  totalMs: number;
+  slowestTools: SpanRow[];
+  waterfall: SpanRow[];
+}
+
+function fmtMs(ms: number): string {
+  return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`;
+}
+
+/** /trace：把聚合数据渲染成 markdown（含 ASCII 瀑布条） */
+async function formatTrace(sessionId: number): Promise<string> {
+  const t = await invoke<TraceSummaryData>("trace_summary", { sessionId });
+  if (t.turns === 0 && t.waterfall.length === 0) {
+    return "本会话还没有 trace 记录（发一条消息后再看）。";
+  }
+  const overview =
+    `**本会话 trace**\n\n` +
+    `| 指标 | 值 |\n|---|---|\n` +
+    `| 回合数 | ${t.turns} |\n` +
+    `| LLM 调用 | ${t.llmCalls} |\n` +
+    `| 输入 tokens | ${t.inputTokens.toLocaleString()} |\n` +
+    `| 输出 tokens | ${t.outputTokens.toLocaleString()} |\n` +
+    `| 工具调用 | ${t.toolCalls} |\n` +
+    `| 累计耗时 | ${fmtMs(t.totalMs)} |`;
+
+  let slowest = "";
+  if (t.slowestTools.length > 0) {
+    const maxMs = Math.max(...t.slowestTools.map((s) => s.durationMs), 1);
+    const lines = t.slowestTools
+      .map((s) => {
+        const bars = "█".repeat(Math.max(1, Math.round((s.durationMs / maxMs) * 18)));
+        return `${fmtMs(s.durationMs).padStart(7)}  ${bars} ${s.name}${s.isError ? " (err)" : ""}`;
+      })
+      .join("\n");
+    slowest = `\n\n**最慢工具**\n\n\`\`\`\n${lines}\n\`\`\``;
+  }
+  return overview + slowest;
 }
 
 // value 格式: "<provider>/<model>"，provider 对应 Rust 端 llm/registry.rs
@@ -161,16 +215,95 @@ export const useChatStore = create<ChatState>((set, get) => ({
     if (streaming || !text.trim()) return;
 
     // 快捷命令本地处理，不经过 LLM、不落库
-    if (text.trim().startsWith("/")) {
-      const reply = await runSlashCommand(text.trim());
-      if (reply !== null) {
-        set({
+    const trimmed = text.trim();
+    if (trimmed.startsWith("/")) {
+      const cmd = trimmed.split(/\s/)[0].toLowerCase();
+      const arg = trimmed.slice(cmd.length).trim();
+      const echo = (reply: string) =>
+        set((s) => ({
           items: [
-            ...items,
-            { kind: "msg", role: "user", content: text.trim() },
+            ...s.items,
+            { kind: "msg", role: "user", content: trimmed },
             { kind: "msg", role: "assistant", content: reply },
           ],
-        });
+        }));
+
+      // 需要 store 状态的命令
+      if (cmd === "/clear") {
+        useSessionStore.getState().startNew();
+        return;
+      }
+      if (cmd === "/model") {
+        if (!arg) {
+          const all = MODEL_GROUPS.flatMap((g) => g.options);
+          const list = all
+            .map((o) => `- ${o.value === model ? "**▸ " : ""}\`${o.value}\`${o.value === model ? "**（当前）" : ""} — ${o.label}`)
+            .join("\n");
+          echo(`**当前模型** \`${model}\`\n\n切换：\`/model <名称片段>\`\n\n${list}`);
+          return;
+        }
+        const all = MODEL_GROUPS.flatMap((g) => g.options);
+        const hit =
+          all.find((o) => o.value === arg) ??
+          all.find((o) => o.value.toLowerCase().includes(arg.toLowerCase()) || o.label.toLowerCase().includes(arg.toLowerCase()));
+        if (hit) {
+          get().setModel(hit.value);
+          echo(`已切换模型为 \`${hit.value}\`（${hit.label}）`);
+        } else {
+          echo(`没找到匹配「${arg}」的模型，用 \`/model\` 看全部。`);
+        }
+        return;
+      }
+      if (cmd === "/compact") {
+        const msgs = get()
+          .items.filter((i): i is Extract<ChatItem, { kind: "msg" }> => i.kind === "msg")
+          .filter((i) => i.content.trim() !== "");
+        if (msgs.length < 2) {
+          echo("当前会话太短，无需压缩。");
+          return;
+        }
+        set({ items: [...get().items, { kind: "msg", role: "user", content: trimmed }] });
+        try {
+          const { provider, model: modelId } = splitModelValue(model);
+          void modelId;
+          const summary = await invoke<string>("compact_now", {
+            provider,
+            messages: msgs.map(({ role, content }) => ({ role, content })),
+          });
+          set({
+            items: [
+              { kind: "notice", text: "🗜 已手动压缩：以下为整段会话的结构化摘要，后续对话基于它继续" },
+              { kind: "msg", role: "assistant", content: summary },
+            ],
+          });
+          const sid = get().currentSessionId;
+          if (sid !== null) {
+            await saveSessionItems(sid, JSON.stringify(get().items));
+            void useSessionStore.getState().refresh();
+          }
+        } catch (e) {
+          set({ error: `压缩失败: ${e}` });
+        }
+        return;
+      }
+      if (cmd === "/trace") {
+        const sid = get().currentSessionId;
+        if (sid === null) {
+          echo("当前还没有会话记录。");
+          return;
+        }
+        try {
+          echo(await formatTrace(sid));
+        } catch (e) {
+          echo(`读取 trace 失败: ${e}`);
+        }
+        return;
+      }
+
+      // 无状态命令
+      const reply = await runSlashCommand(trimmed);
+      if (reply !== null) {
+        echo(reply);
         return;
       }
     }

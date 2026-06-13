@@ -86,6 +86,8 @@ pub fn run() {
             commands::session::list_projects,
             commands::session::remove_project,
             commands::info::list_capabilities,
+            commands::info::trace_summary,
+            commands::chat::compact_now,
             commands::browser::probe_url,
             commands::browser::browser_show,
             commands::browser::browser_bounds,

@@ -131,7 +131,47 @@ fn cheap_model_for(provider: &str) -> &'static str {
 const COMPACT_TRIGGER_CHARS: usize = 100_000;
 const KEEP_RECENT_MESSAGES: usize = 10; // 保留最近 ~5 轮（user+assistant）的原文
 
-/// 超阈值时：保留最近 N 条消息原文，更早的全部交给便宜模型做三段式摘要。
+const COMPACT_SYSTEM: &str = "你在压缩一段 coding agent 的对话历史，供后续轮次无损接续。严格按下列结构输出，每节用紧凑中文要点；某节无内容写「无」。不要寒暄、不要评论、不要复述本指令。\n\
+## 总体目标\n用户最终想达成什么（一两句），以及明确的约束/偏好（语言、风格、禁止项等）。\n\
+## 当前任务\n此刻正在做的那件事是什么。\n## 任务详情\n该任务的关键细节：涉及的文件路径、函数/类/变量等代码标识符、用到的命令、依赖关系。\n## 任务状态\n已完成的步骤与已验证的结论；当前卡在哪一步或正在等待什么。\n\
+## 已确认的决定\n已敲定、后续不应推翻的方案与取舍。\n\
+## 待办事项\n按顺序列出未完成的步骤与下一步计划。\n\
+## 遗留问题\n已知的坑、报错、不确定点、需要用户确认的事。";
+
+/// 用便宜模型把一段历史摘要成结构化文本（compact_history 与 /compact 共用）
+async fn summarize_messages(
+    endpoint: &registry::Endpoint,
+    api_key: &str,
+    provider: &str,
+    cancel: &Arc<std::sync::atomic::AtomicBool>,
+    old: &[HistoryItem],
+) -> Result<String, String> {
+    let transcript: String = old
+        .iter()
+        .map(|item| match item {
+            HistoryItem::User(t) => format!("用户: {t}"),
+            HistoryItem::Assistant { text, .. } => format!("助手: {text}"),
+            HistoryItem::ToolResult { name, .. } => format!("(工具 {name} 的结果，略)"),
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    let summary_history = vec![HistoryItem::User(transcript)];
+    let cheap = cheap_model_for(provider);
+    let turn = match endpoint {
+        registry::Endpoint::Anthropic => {
+            crate::llm::anthropic::stream_chat(api_key, cheap, Some(COMPACT_SYSTEM), &summary_history, &[], cancel, |_| {}).await?
+        }
+        registry::Endpoint::OpenAiCompatible { chat_url, .. } => {
+            crate::llm::openai::stream_chat(chat_url, api_key, cheap, Some(COMPACT_SYSTEM), &summary_history, &[], cancel, |_| {}).await?
+        }
+    };
+    if turn.text.trim().is_empty() {
+        return Err("摘要为空".into());
+    }
+    Ok(turn.text.trim().to_string())
+}
+
+/// 超阈值时：保留最近 N 条消息原文，更早的全部交给便宜模型做摘要。
 /// 返回 (新历史, 提示文案)
 async fn compact_history(
     endpoint: &registry::Endpoint,
@@ -150,55 +190,52 @@ async fn compact_history(
     }
 
     let split = history.len() - KEEP_RECENT_MESSAGES;
-    let old = &history[..split];
-    let old_chars: usize = old.iter().map(item_chars).sum();
-    let transcript: String = old
-        .iter()
-        .map(|item| match item {
-            HistoryItem::User(t) => format!("用户: {t}"),
-            HistoryItem::Assistant { text, .. } => format!("助手: {text}"),
-            HistoryItem::ToolResult { name, .. } => format!("(工具 {name} 的结果，略)"),
-        })
-        .collect::<Vec<_>>()
-        .join("\n\n");
+    let old_chars: usize = history[..split].iter().map(item_chars).sum();
+    let result = summarize_messages(endpoint, api_key, provider, cancel, &history[..split]).await;
 
-    let system = "你在压缩一段 coding agent 的对话历史，供后续轮次无损接续。严格按下列结构输出，每节用紧凑中文要点；某节无内容写「无」。不要寒暄、不要评论、不要复述本指令。\n\
-## 总体目标\n用户最终想达成什么（一两句），以及明确的约束/偏好（语言、风格、禁止项等）。\n\
-## 当前任务\n此刻正在做的那件事是什么。\n## 任务详情\n该任务的关键细节：涉及的文件路径、函数/类/变量等代码标识符、用到的命令、依赖关系。\n## 任务状态\n已完成的步骤与已验证的结论；当前卡在哪一步或正在等待什么。\n\
-## 已确认的决定\n已敲定、后续不应推翻的方案与取舍。\n\
-## 待办事项\n按顺序列出未完成的步骤与下一步计划。\n\
-## 遗留问题\n已知的坑、报错、不确定点、需要用户确认的事。";
-    let summary_history = vec![HistoryItem::User(transcript)];
-    let cheap = cheap_model_for(provider);
-    let result = match endpoint {
-        registry::Endpoint::Anthropic => {
-            crate::llm::anthropic::stream_chat(api_key, cheap, Some(system), &summary_history, &[], cancel, |_| {}).await
-        }
-        registry::Endpoint::OpenAiCompatible { chat_url, .. } => {
-            crate::llm::openai::stream_chat(chat_url, api_key, cheap, Some(system), &summary_history, &[], cancel, |_| {}).await
-        }
-    };
-
-    match result {
-        Ok(turn) if !turn.text.trim().is_empty() => {
-            let summary_chars = turn.text.chars().count();
+    match result.map(Ok::<_, String>) {
+        Ok(Ok(summary)) => {
+            let summary_chars = summary.chars().count();
             let mut compacted = vec![HistoryItem::User(format!(
-                "[早前对话的自动摘要，原文已压缩；最近 {KEEP_RECENT_MESSAGES} 条消息保留在后面]\n{}",
-                turn.text.trim()
+                "[早前对话的自动摘要，原文已压缩；最近 {KEEP_RECENT_MESSAGES} 条消息保留在后面]\n{summary}"
             ))];
             compacted.extend_from_slice(&history[split..]);
-            (
+            return (
                 compacted,
                 Some(format!(
-                    "已把早前 {split} 条消息压缩为三段式摘要（{old_chars} → {summary_chars} 字符），保留最近 {KEEP_RECENT_MESSAGES} 条原文"
+                    "已把早前 {split} 条消息压缩为结构化摘要（{old_chars} → {summary_chars} 字符），保留最近 {KEEP_RECENT_MESSAGES} 条原文"
                 )),
-            )
+            );
         }
-        _ => (
-            truncate_history(history),
-            Some("摘要压缩失败，已按旧策略截断最早消息".into()),
-        ),
+        _ => {}
     }
+    (
+        truncate_history(history),
+        Some("摘要压缩失败，已按旧策略截断最早消息".into()),
+    )
+}
+
+/// /compact：手动把整段历史摘要成一条结构化摘要（前端用它替换会话）
+#[tauri::command]
+pub async fn compact_now(
+    provider: String,
+    messages: Vec<ChatMessage>,
+) -> Result<String, String> {
+    let endpoint = registry::resolve(&provider)?;
+    let api_key = registry::api_key_for(&endpoint)?;
+    let history: Vec<HistoryItem> = messages
+        .into_iter()
+        .filter(|m| !m.content.is_empty())
+        .map(|m| match m.role.as_str() {
+            "assistant" => HistoryItem::Assistant { text: m.content, tool_calls: vec![] },
+            _ => HistoryItem::User(m.content),
+        })
+        .collect();
+    if history.is_empty() {
+        return Err("没有可压缩的内容".into());
+    }
+    let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    summarize_messages(&endpoint, &api_key, &provider, &cancel, &history).await
 }
 
 /// 回滚某个检查点：把当时改动的文件恢复到改动前

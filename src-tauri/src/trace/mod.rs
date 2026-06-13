@@ -104,6 +104,93 @@ pub fn remove_trace(traces_dir: &Path, session_id: i64) {
     let _ = std::fs::remove_file(traces_dir.join(format!("{session_id}.jsonl")));
 }
 
+// ===== /trace 聚合：把 jsonl span 汇总成可读统计 =====
+
+#[derive(Debug, Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpanRow {
+    pub name: String,
+    pub duration_ms: u64,
+    pub is_error: bool,
+}
+
+#[derive(Debug, Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TraceSummary {
+    pub turns: usize,
+    pub llm_calls: usize,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub tool_calls: usize,
+    pub total_ms: u64,
+    /// 按耗时降序的 top 工具
+    pub slowest_tools: Vec<SpanRow>,
+    /// 按开始时间排序的全部 span（瀑布）
+    pub waterfall: Vec<SpanRow>,
+}
+
+fn span_duration_ms(v: &serde_json::Value) -> u64 {
+    let parse = |k: &str| {
+        v[k].as_str()
+            .and_then(|s| s.parse::<u128>().ok())
+            .unwrap_or(0)
+    };
+    let (start, end) = (parse("start_time_unix_nano"), parse("end_time_unix_nano"));
+    if end > start {
+        ((end - start) / 1_000_000) as u64
+    } else {
+        0
+    }
+}
+
+/// 聚合一个会话的 trace 文件（不存在则返回空统计）
+pub fn summarize(traces_dir: &Path, session_id: i64) -> TraceSummary {
+    let path = traces_dir.join(format!("{session_id}.jsonl"));
+    let Ok(content) = std::fs::read_to_string(&path) else {
+        return TraceSummary::default();
+    };
+
+    let mut s = TraceSummary::default();
+    let mut spans: Vec<(u128, SpanRow)> = Vec::new();
+
+    for line in content.lines() {
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        let name = v["name"].as_str().unwrap_or("").to_string();
+        let dur = span_duration_ms(&v);
+        let is_error = v["status"]["code"].as_str() == Some("STATUS_CODE_ERROR");
+        let start = v["start_time_unix_nano"].as_str().and_then(|x| x.parse().ok()).unwrap_or(0);
+
+        if name == "agent.run" {
+            s.turns += 1;
+            s.total_ms += dur;
+        } else if name.starts_with("chat ") {
+            s.llm_calls += 1;
+            s.input_tokens += v["attributes"]["gen_ai.usage.input_tokens"].as_u64().unwrap_or(0);
+            s.output_tokens += v["attributes"]["gen_ai.usage.output_tokens"].as_u64().unwrap_or(0);
+        } else if name.starts_with("tool ") {
+            s.tool_calls += 1;
+        }
+        spans.push((start, SpanRow { name, duration_ms: dur, is_error }));
+    }
+
+    // 最慢工具 top 8
+    let mut tools: Vec<SpanRow> = spans
+        .iter()
+        .filter(|(_, r)| r.name.starts_with("tool "))
+        .map(|(_, r)| SpanRow { name: r.name.clone(), duration_ms: r.duration_ms, is_error: r.is_error })
+        .collect();
+    tools.sort_by(|a, b| b.duration_ms.cmp(&a.duration_ms));
+    tools.truncate(8);
+    s.slowest_tools = tools;
+
+    // 瀑布：按开始时间
+    spans.sort_by_key(|(start, _)| *start);
+    s.waterfall = spans.into_iter().map(|(_, r)| r).collect();
+    s
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

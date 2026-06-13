@@ -21,6 +21,17 @@ pub struct Capabilities {
     pub skills: Vec<CapabilityItem>,
 }
 
+/// /trace：聚合本会话的 trace 文件
+#[tauri::command]
+pub fn trace_summary(
+    session_id: i64,
+    app: tauri::AppHandle,
+) -> Result<crate::trace::TraceSummary, String> {
+    use tauri::Manager;
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    Ok(crate::trace::summarize(&dir.join("traces"), session_id))
+}
+
 #[tauri::command]
 pub fn list_capabilities(
     state: State<'_, AppState>,
