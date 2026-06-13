@@ -1,5 +1,8 @@
 //! 写操作审批：loop 发起 ask 并挂起等待，前端调 approve_permission 决议
 
+pub mod danger;
+
+
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;

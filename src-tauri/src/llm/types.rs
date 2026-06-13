@@ -4,6 +4,27 @@ use serde_json::Value;
 /// 用户主动停止的标记错误（loop 捕获后优雅收尾，不当成真错误）
 pub const CANCELLED_ERR: &str = "__CF_CANCELLED__";
 
+/// 把 reqwest 发送错误转成给用户看的友好中文提示
+pub fn friendly_send_error(e: &reqwest::Error) -> String {
+    if e.is_timeout() {
+        "请求超时：模型服务长时间无响应，请稍后重试或检查网络/代理".into()
+    } else if e.is_connect() {
+        "无法连接到模型服务：请检查网络连接、代理设置，或确认服务地址可达".into()
+    } else {
+        format!("请求失败：{e}")
+    }
+}
+
+/// 把 HTTP 错误状态转成友好提示（401/403=鉴权，429=限流，5xx=服务端）
+pub fn friendly_status_error(status: u16, raw_message: &str) -> String {
+    match status {
+        401 | 403 => format!("API key 无效或无权限（HTTP {status}）：请在设置中检查密钥。详情：{raw_message}"),
+        429 => format!("请求过于频繁或配额耗尽（HTTP 429）：请稍后再试或更换模型。详情：{raw_message}"),
+        500..=599 => format!("模型服务端错误（HTTP {status}）：通常稍后重试即可。详情：{raw_message}"),
+        _ => format!("API 错误（HTTP {status}）：{raw_message}"),
+    }
+}
+
 /// 前端发来的简单消息（不含工具轮次）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMessage {

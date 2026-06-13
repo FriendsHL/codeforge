@@ -521,6 +521,29 @@ body.resizing {
   margin: 0;
 }
 
+.approval-danger {
+  border-color: #cf1322 !important;
+}
+
+.approval-danger-banner {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: #fff1f0;
+  color: #a8071a;
+  border: 1px solid #ffccc7;
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+
+[data-theme="dark"] .approval-danger-banner {
+  background: #3a1a1a;
+  border-color: #5c2626;
+  color: #ff7875;
+}
+
 .approval-card {
   align-self: stretch;
   max-width: 90%;

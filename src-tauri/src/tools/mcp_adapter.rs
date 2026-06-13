@@ -49,6 +49,7 @@ impl Tool for McpToolAdapter {
                 serde_json::to_string(input).unwrap_or_default()
             ),
             diff: String::new(),
+            danger: None,
         }))
     }
 

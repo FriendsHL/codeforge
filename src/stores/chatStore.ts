@@ -175,6 +175,7 @@ export type ChatItem =
       toolName: string;
       summary: string;
       diff: string;
+      danger?: string | null;
       decision?: "approved" | "denied" | "allowAll";
     };
 
@@ -433,6 +434,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 toolName: event.toolName,
                 summary: event.summary,
                 diff: event.diff,
+                danger: event.danger,
               });
               return items;
             });

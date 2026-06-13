@@ -17,7 +17,14 @@ export type AgentEvent =
       durationMs: number;
       checkpointId: string | null;
     }
-  | { type: "permissionAsk"; requestId: string; toolName: string; summary: string; diff: string }
+  | {
+      type: "permissionAsk";
+      requestId: string;
+      toolName: string;
+      summary: string;
+      diff: string;
+      danger: string | null;
+    }
   | { type: "commandOutput"; id: string; chunk: string }
   | {
       type: "turnEnd";

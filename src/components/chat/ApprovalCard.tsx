@@ -6,6 +6,7 @@ import {
   CodeOutlined,
   EditOutlined,
   ThunderboltOutlined,
+  WarningOutlined,
 } from "@ant-design/icons";
 import { approvePermission } from "../../lib/ipc";
 import type { ChatItem } from "../../stores/chatStore";
@@ -35,7 +36,7 @@ export function ApprovalCard({ item }: { item: Extract<ChatItem, { kind: "approv
   };
 
   return (
-    <div className="approval-card">
+    <div className={`approval-card ${item.danger ? "approval-danger" : ""}`}>
       <div className="approval-header">
         {isBash ? <CodeOutlined /> : <EditOutlined />}
         <span>
@@ -48,6 +49,11 @@ export function ApprovalCard({ item }: { item: Extract<ChatItem, { kind: "approv
         {item.decision === "allowAll" && <Tag color="green">已允许（本会话全部）</Tag>}
         {item.decision === "denied" && <Tag color="red">已拒绝</Tag>}
       </div>
+      {item.danger && (
+        <div className="approval-danger-banner">
+          <WarningOutlined /> 危险操作：{item.danger}。请仔细确认后再允许。
+        </div>
+      )}
       {isBash ? (
         <pre className="approval-command">$ {item.summary}</pre>
       ) : (

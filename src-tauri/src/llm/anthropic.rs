@@ -216,7 +216,7 @@ pub async fn stream_chat(
         .json(&body)
         .send()
         .await
-        .map_err(|e| format!("请求失败: {e}"))?;
+        .map_err(|e| super::types::friendly_send_error(&e))?;
 
     if !response.status().is_success() {
         let status = response.status();
@@ -225,7 +225,7 @@ pub async fn stream_chat(
             .ok()
             .and_then(|v| v["error"]["message"].as_str().map(String::from))
             .unwrap_or(text);
-        return Err(format!("API 错误 ({status}): {message}"));
+        return Err(super::types::friendly_status_error(status.as_u16(), &message));
     }
 
     let mut turn = AssistantTurn::default();

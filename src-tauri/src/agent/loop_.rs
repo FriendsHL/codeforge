@@ -463,6 +463,7 @@ async fn execute_tool(
                 tool_name: name.to_string(),
                 summary: plan.summary,
                 diff: plan.diff,
+                danger: plan.danger,
             });
             if !ctx.permissions.wait(request_id, rx).await {
                 return Err("用户拒绝了本次操作。请询问用户的意图后再调整方案，不要原样重试。".into());

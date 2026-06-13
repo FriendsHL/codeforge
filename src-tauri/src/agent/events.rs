@@ -28,6 +28,8 @@ pub enum AgentEvent {
         /// 写文件 = 路径；执行命令 = 命令本身
         summary: String,
         diff: String,
+        /// 命中危险模式时的警告原因（前端红色高亮）
+        danger: Option<String>,
     },
     /// bash 命令的实时输出片段（流向前端终端面板）
     #[serde(rename_all = "camelCase")]

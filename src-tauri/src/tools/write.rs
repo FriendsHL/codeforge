@@ -60,7 +60,7 @@ impl Tool for WriteFileTool {
 
     fn plan(&self, workspace: &Path, input: &Value) -> Result<Option<ApprovalPlan>, String> {
         let (_, rel, old, new) = write_file_parts(workspace, input)?;
-        Ok(Some(ApprovalPlan { diff: unified_diff(&rel, &old, &new), summary: rel }))
+        Ok(Some(ApprovalPlan { diff: unified_diff(&rel, &old, &new), summary: rel, danger: None }))
     }
 
     fn affected_paths(&self, input: &Value) -> Vec<String> {
@@ -137,7 +137,7 @@ impl Tool for EditFileTool {
 
     fn plan(&self, workspace: &Path, input: &Value) -> Result<Option<ApprovalPlan>, String> {
         let (_, rel, old, new) = edit_file_parts(workspace, input)?;
-        Ok(Some(ApprovalPlan { diff: unified_diff(&rel, &old, &new), summary: rel }))
+        Ok(Some(ApprovalPlan { diff: unified_diff(&rel, &old, &new), summary: rel, danger: None }))
     }
 
     fn affected_paths(&self, input: &Value) -> Vec<String> {

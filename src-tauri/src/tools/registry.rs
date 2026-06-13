@@ -9,10 +9,12 @@ use crate::llm::types::ToolSpec;
 
 /// 副作用操作的预演：loop 据此向用户发起审批
 /// 写文件：summary=路径、diff=改动；执行命令：summary=命令、diff 为空
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ApprovalPlan {
     pub summary: String,
     pub diff: String,
+    /// 命中危险模式时的警告原因；前端据此红色高亮
+    pub danger: Option<String>,
 }
 
 pub trait Tool: Send + Sync {

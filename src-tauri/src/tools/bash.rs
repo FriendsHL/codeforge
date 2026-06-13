@@ -44,7 +44,11 @@ impl Tool for BashTool {
 
     fn plan(&self, _workspace: &Path, input: &Value) -> Result<Option<ApprovalPlan>, String> {
         let command = input["command"].as_str().ok_or("缺少 command 参数")?;
-        Ok(Some(ApprovalPlan { summary: command.to_string(), diff: String::new() }))
+        Ok(Some(ApprovalPlan {
+            summary: command.to_string(),
+            diff: String::new(),
+            danger: crate::security::danger::detect(command),
+        }))
     }
 
     fn run(&self, workspace: &Path, input: &Value) -> Result<String, String> {
