@@ -1,4 +1,4 @@
-//! web 工具：web_fetch（抓网页转文本）/ web_search（Tavily 优先，DuckDuckGo 兜底）
+//! web 工具：web_fetch（抓网页转 Markdown）/ web_search（Tavily 优先，DuckDuckGo 兜底）
 
 use std::path::Path;
 use std::time::Duration;
@@ -21,6 +21,31 @@ fn http_client() -> Result<reqwest::blocking::Client, String> {
         .map_err(|e| e.to_string())
 }
 
+/// HTML → Markdown，并跳过 script/style/nav 等对阅读无意义的标签
+fn html_to_markdown(html: &str) -> String {
+    let md = htmd::HtmlToMarkdown::builder()
+        .skip_tags(vec!["script", "style", "nav", "footer", "noscript", "svg", "head"])
+        .build()
+        .convert(html)
+        .unwrap_or_else(|_| html.to_string());
+    // 折叠 3+ 连续空行为 2 行，markdown 转换常留大量空行
+    let mut out = String::with_capacity(md.len());
+    let mut blank = 0;
+    for line in md.lines() {
+        if line.trim().is_empty() {
+            blank += 1;
+            if blank <= 2 {
+                out.push('\n');
+            }
+        } else {
+            blank = 0;
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+    out
+}
+
 fn cap_chars(text: &str, limit: usize) -> String {
     if text.chars().count() <= limit {
         return text.to_string();
@@ -35,7 +60,7 @@ impl Tool for WebFetchTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "web_fetch".into(),
-            description: "抓取一个 URL 的内容并转成可读文本（HTML 会去标签）。适合看文档、issue、报错解释等。".into(),
+            description: "抓取一个 URL 的内容并转成 Markdown（HTML 会保留标题/链接/列表/代码块结构）。适合看文档、issue、报错解释等。".into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -76,10 +101,11 @@ impl Tool for WebFetchTool {
             return Err(format!("响应超过 {} MB，拒绝处理", MAX_BODY_BYTES / 1024 / 1024));
         }
 
+        let raw = String::from_utf8_lossy(&bytes);
         let text = if content_type.contains("text/html") {
-            html2text::from_read(&bytes[..], 100)
+            html_to_markdown(&raw)
         } else {
-            String::from_utf8_lossy(&bytes).to_string()
+            raw.to_string()
         };
         Ok(format!("[{status}] {url}\n\n{}", cap_chars(text.trim(), max_chars)))
     }
@@ -240,6 +266,22 @@ mod tests {
         assert_eq!(hits[0].url, "https://tauri.app/");
         assert_eq!(hits[0].title, "Tauri 2");
         assert_eq!(hits[0].snippet, "Build small apps");
+    }
+
+    #[test]
+    fn converts_html_to_markdown() {
+        let html = r#"<html><head><style>x{}</style></head><body>
+        <h1>标题</h1><p>一段 <a href="https://x.com">链接</a> 文字。</p>
+        <ul><li>项一</li><li>项二</li></ul>
+        <pre><code>fn main() {}</code></pre>
+        <script>alert(1)</script>
+        </body></html>"#;
+        let md = html_to_markdown(html);
+        assert!(md.contains("# 标题"));
+        assert!(md.contains("[链接](https://x.com)"));
+        assert!(md.contains("项一"));
+        assert!(!md.contains("alert(1)"), "script 应被跳过");
+        assert!(!md.contains("x{}"), "style 应被跳过");
     }
 
     #[test]
