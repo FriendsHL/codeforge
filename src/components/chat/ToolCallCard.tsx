@@ -20,6 +20,7 @@ const TOOL_LABELS: Record<string, string> = {
   write_file: "写文件",
   edit_file: "改文件",
   bash: "执行命令",
+  diagnostics: "代码检查",
   web_fetch: "抓网页",
   web_search: "搜索",
   research_plan: "调研方法",
@@ -45,6 +46,8 @@ function summarizeInput(name: string, input: unknown): string {
       return [obj.pattern, obj.include, obj.path].filter(Boolean).join("  ");
     case "bash":
       return String(obj.command ?? "");
+    case "diagnostics":
+      return String(obj.checker ?? "自动");
     case "web_fetch":
     case "browser_open":
       return String(obj.url ?? "");
