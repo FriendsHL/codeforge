@@ -73,6 +73,8 @@ pub fn run() {
             commands::workspace::set_workspace,
             commands::workspace::read_dir_tree,
             commands::workspace::read_file_preview,
+            commands::workspace::search_files,
+            commands::workspace::read_files_for_context,
             commands::git::git_overview,
             commands::git::git_file_diff,
             commands::session::list_sessions,

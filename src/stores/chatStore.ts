@@ -95,7 +95,13 @@ export function splitModelValue(value: string): { provider: string; model: strin
 }
 
 export type ChatItem =
-  | { kind: "msg"; role: "user" | "assistant"; content: string; reasoning?: string }
+  | {
+      kind: "msg";
+      role: "user" | "assistant";
+      content: string;
+      reasoning?: string;
+      mentions?: string[];
+    }
   | { kind: "notice"; text: string }
   | {
       kind: "tool";
@@ -130,7 +136,8 @@ interface ChatState {
   /** 最近一次请求的真实上下文大小（API usage.input_tokens） */
   contextTokens: number | null;
   setModel: (model: string) => void;
-  send: (text: string) => Promise<void>;
+  /** mentions: @ 引用的文件相对路径，内容会注入本轮上下文 */
+  send: (text: string, mentions?: string[]) => Promise<void>;
   clear: () => void;
 }
 
@@ -149,7 +156,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ model });
   },
 
-  send: async (text) => {
+  send: async (text, mentions = []) => {
     const { items, model, streaming } = get();
     if (streaming || !text.trim()) return;
 
@@ -184,18 +191,32 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
     }
 
+    // @ 引用的文件内容注入本轮（仅本轮，不污染展示文本；后续轮 agent 可自行 read_file）
+    let injected = text;
+    if (mentions.length > 0) {
+      try {
+        const { readFilesForContext } = await import("../lib/ipc");
+        const block = await readFilesForContext(mentions);
+        injected = `${text}\n\n[用户引用的文件内容]\n${block}`;
+      } catch (e) {
+        set({ error: `读取引用文件失败: ${e}` });
+        return;
+      }
+    }
+
     // 跨轮次历史只保留纯文本消息（工具轮次每次由 Rust 端 loop 内部重建；notice 不进历史）
     const history: ChatMessage[] = [
       ...get()
         .items.filter((i): i is Extract<ChatItem, { kind: "msg" }> => i.kind === "msg")
         .filter((i) => i.content.trim() !== "")
         .map(({ role, content }) => ({ role, content })),
-      { role: "user" as const, content: text },
+      { role: "user" as const, content: injected },
     ];
 
     useTodoStore.getState().clear(); // 新回合清空旧任务清单
     set({
-      items: [...items, { kind: "msg", role: "user", content: text }],
+      // 展示用原文（带 @path），气泡下方另列引用的文件
+      items: [...items, { kind: "msg", role: "user", content: text, mentions }],
       streaming: true,
       error: null,
     });

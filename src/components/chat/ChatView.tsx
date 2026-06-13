@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Alert, App, Button, Empty, Input, Tooltip } from "antd";
+import { Alert, App, Button, Empty, Input, Tag, Tooltip } from "antd";
 import { ClearOutlined, SendOutlined, StopOutlined } from "@ant-design/icons";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -7,6 +7,7 @@ import { stopGeneration } from "../../lib/ipc";
 import { ChatItem, useChatStore } from "../../stores/chatStore";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
 import { ApprovalCard } from "./ApprovalCard";
+import { MentionPicker } from "./MentionPicker";
 import { SubagentGroup } from "./SubagentGroup";
 import { ThinkingCard } from "./ThinkingCard";
 import { TodoPanel } from "./TodoPanel";
@@ -55,8 +56,11 @@ export function ChatView() {
   const { items, streaming, error, send, clear, terminalOpen, sessionTokens, contextTokens } =
     useChatStore();
   const workspaceName = useWorkspaceStore((s) => s.name);
+  const hasWorkspace = useWorkspaceStore((s) => s.root !== null);
   const { message } = App.useApp();
   const [draft, setDraft] = useState("");
+  const [mentions, setMentions] = useState<string[]>([]); // @ 引用的文件
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null); // null=未触发
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -67,7 +71,25 @@ export function ChatView() {
     const text = draft.trim();
     if (!text || streaming) return;
     setDraft("");
-    void send(text);
+    const used = mentions;
+    setMentions([]);
+    setMentionQuery(null);
+    void send(text, used);
+  };
+
+  // 监听输入：光标处刚打 @ 且后面是连续非空白 → 进入引用模式
+  const onDraftChange = (value: string) => {
+    setDraft(value);
+    if (!hasWorkspace) return;
+    const m = /@([^\s@]*)$/.exec(value);
+    setMentionQuery(m ? m[1] : null);
+  };
+
+  const pickMention = (path: string) => {
+    if (!mentions.includes(path)) setMentions([...mentions, path]);
+    // 去掉输入框里正在打的 @query 片段
+    setDraft((d) => d.replace(/@[^\s@]*$/, ""));
+    setMentionQuery(null);
   };
 
   const stop = () => {
@@ -111,6 +133,13 @@ export function ChatView() {
               ) : (
                 item.content
               )}
+              {item.mentions && item.mentions.length > 0 && (
+                <div className="bubble-mentions">
+                  {item.mentions.map((m) => (
+                    <span key={m} className="bubble-mention">@{m}</span>
+                  ))}
+                </div>
+              )}
             </div>
           );
         })}
@@ -138,20 +167,50 @@ export function ChatView() {
         </div>
       )}
 
+      {mentions.length > 0 && (
+        <div className="mention-chips">
+          {mentions.map((m) => (
+            <Tag
+              key={m}
+              closable
+              onClose={() => setMentions(mentions.filter((x) => x !== m))}
+              color="orange"
+            >
+              @{m}
+            </Tag>
+          ))}
+        </div>
+      )}
+
       <div className="chat-input">
-        <Input.TextArea
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onPressEnter={(e) => {
-            if (!e.shiftKey) {
-              e.preventDefault();
-              submit();
+        <div className="chat-input-box">
+          {mentionQuery !== null && (
+            <MentionPicker
+              query={mentionQuery}
+              onPick={pickMention}
+              onClose={() => setMentionQuery(null)}
+            />
+          )}
+          <Input.TextArea
+            value={draft}
+            onChange={(e) => onDraftChange(e.target.value)}
+            onPressEnter={(e) => {
+              // 引用浮层打开时 Enter 交给浮层选择，不发送
+              if (mentionQuery !== null) return;
+              if (!e.shiftKey) {
+                e.preventDefault();
+                submit();
+              }
+            }}
+            placeholder={
+              hasWorkspace
+                ? "输入消息，Enter 发送；@ 引用文件；/ 查看快捷命令"
+                : "输入消息，Enter 发送；/ 查看快捷命令（/tools /skills /mcp）"
             }
-          }}
-          placeholder="输入消息，Enter 发送；/ 查看快捷命令（/tools /skills /mcp）"
-          autoSize={{ minRows: 1, maxRows: 6 }}
-          disabled={streaming}
-        />
+            autoSize={{ minRows: 1, maxRows: 6 }}
+            disabled={streaming}
+          />
+        </div>
         <Tooltip title="清空会话">
           <Button icon={<ClearOutlined />} onClick={clear} disabled={streaming} />
         </Tooltip>

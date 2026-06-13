@@ -129,6 +129,82 @@ pub fn read_dir_tree(path: String, state: State<'_, AppState>) -> Result<Vec<Tre
     Ok(nodes)
 }
 
+const MAX_MENTION_RESULTS: usize = 30;
+const MAX_MENTION_FILE_BYTES: usize = 64 * 1024;
+
+/// @文件引用：按关键词模糊匹配工作区文件路径（遵循 .gitignore，只返文件）
+#[tauri::command]
+pub fn search_files(query: String, state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    let workspace = state
+        .workspace
+        .lock()
+        .unwrap()
+        .clone()
+        .ok_or("未打开工作区")?;
+    let needle = query.to_lowercase();
+
+    let mut results = Vec::new();
+    let walker = ignore::WalkBuilder::new(&workspace)
+        .hidden(true)
+        .git_ignore(true)
+        .build();
+    for entry in walker.flatten() {
+        if results.len() >= MAX_MENTION_RESULTS {
+            break;
+        }
+        if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+            continue;
+        }
+        if let Ok(rel) = entry.path().strip_prefix(&workspace) {
+            let rel = rel.to_string_lossy().to_string();
+            // 空 query 返回靠前的一批；否则子串匹配（路径或文件名）
+            if needle.is_empty() || rel.to_lowercase().contains(&needle) {
+                results.push(rel);
+            }
+        }
+    }
+    // 匹配文件名的排在匹配路径的前面，短路径优先
+    results.sort_by_key(|r| {
+        let name_hit = r
+            .rsplit('/')
+            .next()
+            .map(|n| n.to_lowercase().contains(&needle))
+            .unwrap_or(false);
+        (!name_hit, r.len())
+    });
+    Ok(results)
+}
+
+/// 把 @ 引用的多个文件拼成可注入上下文的文本块
+#[tauri::command]
+pub fn read_files_for_context(
+    paths: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let workspace = state
+        .workspace
+        .lock()
+        .unwrap()
+        .clone()
+        .ok_or("未打开工作区")?;
+
+    let mut blocks = Vec::new();
+    for rel in paths {
+        let file = resolve_in_workspace(&workspace, &rel)?;
+        if !file.is_file() {
+            blocks.push(format!("=== {rel} ===\n(不是文件，已跳过)"));
+            continue;
+        }
+        let bytes = std::fs::read(&file).map_err(|e| format!("读取 {rel} 失败: {e}"))?;
+        let truncated = bytes.len() > MAX_MENTION_FILE_BYTES;
+        let slice = if truncated { &bytes[..MAX_MENTION_FILE_BYTES] } else { &bytes[..] };
+        let content = String::from_utf8_lossy(slice);
+        let suffix = if truncated { "\n…(文件过大已截断，需要完整内容请用 read_file)" } else { "" };
+        blocks.push(format!("=== {rel} ===\n{content}{suffix}"));
+    }
+    Ok(blocks.join("\n\n"))
+}
+
 #[tauri::command]
 pub fn read_file_preview(path: String, state: State<'_, AppState>) -> Result<FilePreview, String> {
     let workspace = state

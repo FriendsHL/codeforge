@@ -823,6 +823,72 @@ body.resizing {
   border-top: 1px solid #f0f0f0;
 }
 
-.chat-input .ant-input {
+.chat-input-box {
+  position: relative;
   flex: 1;
+}
+
+.mention-chips {
+  padding: 6px 16px 0;
+  background: #fff;
+}
+
+.mention-picker {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  max-height: 240px;
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid #e8e8e8;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  z-index: 20;
+  padding: 4px;
+}
+
+.mention-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.mention-active {
+  background: #fff7e6;
+}
+
+.mention-name {
+  font-weight: 500;
+}
+
+.mention-dir {
+  color: #aaa;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bubble-mentions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.bubble-mention {
+  font-size: 11px;
+  background: rgba(255, 255, 255, 0.25);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-family: "SF Mono", Menlo, monospace;
+}
+
+.chat-input-box .ant-input {
+  width: 100%;
 }

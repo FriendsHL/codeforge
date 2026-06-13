@@ -69,6 +69,11 @@ export const readDirTree = (path: string) =>
 export const readFilePreview = (path: string) =>
   invoke<FilePreview>("read_file_preview", { path });
 
+export const searchFiles = (query: string) => invoke<string[]>("search_files", { query });
+
+export const readFilesForContext = (paths: string[]) =>
+  invoke<string>("read_files_for_context", { paths });
+
 export interface GitChange {
   path: string;
   status: string;
