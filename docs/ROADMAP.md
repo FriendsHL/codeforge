@@ -106,11 +106,16 @@ M1 是最薄的端到端打通，后面每步在其上叠加。
 ## v4 方向(2026-06-13，基于 research-docs 能力缺口分析，详见 CAPABILITY-GAPS.md)
 
 目标升级为「能编码 + 能调研」。按 ROI：
-1. **记忆系统**(P0)：~/.codeforge/memory + memory_search 工具 + 项目 MEMORY.md → 六信号晋升 → prefetch；接 skillForge 飞轮
+1. **记忆系统**(P0)：~/.codeforge/memory + 项目 MEMORY.md → 六信号晋升 → prefetch；接 skillForge 飞轮
+   - ✅ phase1：两级 MEMORY.md 持久记忆 + remember 工具 + 整段注入
+   - ✅ phase2(v4-8)：六信号质量评分（纯函数，读时重算）+ remember 写入查重去膨胀
+     + 相关性检索（超预算时按 相关度+质量分+新近度 择优注入，不再一刀切截断）
+   - ⏳ phase3(待办)：会话→记忆的后台提炼(dreaming)、向量/FTS 检索、命中频次驱动晋升
 2. **可靠性硬化**(P0)：错误类型化(enum AgentError)、panic 审查、前端关键测试
 3. **调研能力升级**(P0)：引用溯源、Generator-Verifier 自验证、多源综合、报告生成
 4. **LSP 集成**(P1)：diagnostic/hover/definition 喂给 edit/read/grep
-5. **工具并行**(P1)：只读工具并行、路径并发安全
-6. **上下文进阶**(P1)：microcompact 无损压缩、compact boundary+resume、read-before-edit 闸门
+5. **工具并行**(P1)：✅ 只读工具并行、路径并发安全
+6. **上下文进阶**(P1)：✅ read-before-edit 闸门、✅ 重复读去重(微压缩)；⏳ compact boundary+resume
+   - 附带：✅ 上下文占用 + 本轮/会话 token 花费的界面可视化
 7. **分发**(P2)：签名公证 + tauri-updater 自动更新
 8. **自进化 + 面板整合**(P2)

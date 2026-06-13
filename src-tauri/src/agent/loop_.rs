@@ -198,7 +198,13 @@ async fn loop_body(
 ) -> Result<String, String> {
     {
         let plan_only = ctx.mode == AgentMode::Plan;
-        let base_system = prompt::build_system_prompt(ctx.workspace.as_deref(), !is_main, ctx.mode);
+        // 本轮用户问题（取初始历史里最后一条 User），喂给记忆做相关性检索
+        let query = history.iter().rev().find_map(|h| match h {
+            HistoryItem::User(t) => Some(t.clone()),
+            _ => None,
+        });
+        let base_system =
+            prompt::build_system_prompt(ctx.workspace.as_deref(), !is_main, ctx.mode, query.as_deref());
         let mut tools = ctx.registry.specs(ctx.workspace.is_some(), plan_only);
         // plan 模式不派子 agent（子 agent 会绕过工具过滤去执行写操作）
         if is_main && !plan_only {

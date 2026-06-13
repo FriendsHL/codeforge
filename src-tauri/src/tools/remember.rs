@@ -45,8 +45,17 @@ impl Tool for RememberTool {
         let ws = if workspace == std::env::temp_dir() { None } else { Some(workspace) };
         let scope = if ws.is_none() { "global" } else { scope };
 
-        let path = crate::memory::append(ws, scope, category, content)?;
-        let _ = self.app.emit("memory-updated", &path);
-        Ok(format!("已记住（{scope}/{category}）：{content}"))
+        // v4-8：带查重 + 质量门槛的写入，防止记忆膨胀与低质堆积
+        use crate::memory::RememberOutcome;
+        match crate::memory::remember(ws, scope, category, content)? {
+            RememberOutcome::Saved { path } => {
+                let _ = self.app.emit("memory-updated", &path);
+                Ok(format!("已记住（{scope}/{category}）：{content}"))
+            }
+            RememberOutcome::Duplicate { existing } => {
+                Ok(format!("已有相近记忆，未重复记录：{existing}"))
+            }
+            RememberOutcome::TooWeak { reason } => Ok(reason),
+        }
     }
 }

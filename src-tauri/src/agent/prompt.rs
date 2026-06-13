@@ -6,6 +6,8 @@ pub fn build_system_prompt(
     workspace: Option<&Path>,
     is_subagent: bool,
     mode: crate::agent::loop_::AgentMode,
+    // 本轮用户问题：用于记忆的相关性检索（记忆超预算时择优注入）
+    query: Option<&str>,
 ) -> String {
     use crate::agent::loop_::AgentMode;
     let mut sections: Vec<String> = Vec::new();
@@ -69,8 +71,8 @@ pub fn build_system_prompt(
         if let Some(skills_section) = crate::skills::prompt_section(Some(workspace)) {
             sections.push(skills_section);
         }
-        // v4 记忆段
-        if let Some(mem) = crate::memory::prompt_section(Some(workspace)) {
+        // v4 记忆段（v4-8：带相关性检索）
+        if let Some(mem) = crate::memory::prompt_section(Some(workspace), query) {
             sections.push(mem);
         }
     } else {
@@ -84,7 +86,7 @@ pub fn build_system_prompt(
         if let Some(skills_section) = crate::skills::prompt_section(None) {
             sections.push(skills_section);
         }
-        if let Some(mem) = crate::memory::prompt_section(None) {
+        if let Some(mem) = crate::memory::prompt_section(None, query) {
             sections.push(mem);
         }
     }
