@@ -4,6 +4,7 @@ import { ClearOutlined, SendOutlined, StopOutlined } from "@ant-design/icons";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { stopGeneration } from "../../lib/ipc";
+import { contextWindowFor } from "../../lib/models";
 import { ChatItem, useChatStore } from "../../stores/chatStore";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
 import { ApprovalCard } from "./ApprovalCard";
@@ -52,9 +53,73 @@ function workingLabel(items: ChatItem[]): string {
   return "思考中";
 }
 
+/** 把 tokens 数压成易读的 1.2k / 34.5k 形式 */
+function fmtTokens(n: number): string {
+  if (n < 1000) return `${n}`;
+  if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`;
+  return `${(n / 1_000_000).toFixed(2)}M`;
+}
+
+/** 底部上下文/花费状态条：上下文占用进度 + 本轮花费 + 本会话累计花费 */
+function ContextStatusBar({
+  model,
+  contextTokens,
+  turnTokens,
+  sessionTokens,
+  streaming,
+}: {
+  model: string;
+  contextTokens: number | null;
+  turnTokens: number;
+  sessionTokens: number;
+  streaming: boolean;
+}) {
+  const window = contextWindowFor(model);
+  const used = contextTokens ?? 0;
+  const pct = Math.min(100, Math.round((used / window) * 100));
+  // 70% 以下绿色、70~90% 橙色、90%+ 红色，提示该 /compact 了
+  const color = pct >= 90 ? "#ff4d4f" : pct >= 70 ? "#fa8c16" : "#52c41a";
+
+  return (
+    <div className="chat-status">
+      {contextTokens !== null && (
+        <Tooltip title={`当前上下文 ${used.toLocaleString()} / ${window.toLocaleString()} tokens（模型窗口）。接近上限时用 /compact 压缩`}>
+          <span className="chat-status-ctx">
+            <span className="chat-status-bar">
+              <span className="chat-status-bar-fill" style={{ width: `${pct}%`, background: color }} />
+            </span>
+            上下文 {fmtTokens(used)} / {fmtTokens(window)}（{pct}%）
+          </span>
+        </Tooltip>
+      )}
+      <Tooltip title="本轮（最近一次提问）所有 LLM 调用的输入+输出 tokens 之和">
+        <span>本轮 {fmtTokens(turnTokens)} tokens{streaming ? " …" : ""}</span>
+      </Tooltip>
+      <Tooltip title="本会话至今所有 LLM 调用累计的输入+输出 tokens（约等于计费量）">
+        <span>本会话累计 {fmtTokens(sessionTokens)} tokens</span>
+      </Tooltip>
+    </div>
+  );
+}
+
 export function ChatView() {
-  const { items, streaming, error, send, queue, clear, terminalOpen, sessionTokens, contextTokens, mode, setMode } =
-    useChatStore();
+  const {
+    items,
+    streaming,
+    error,
+    send,
+    queue,
+    clear,
+    terminalOpen,
+    sessionTokens,
+    sessionInputTokens,
+    turnInputTokens,
+    turnOutputTokens,
+    contextTokens,
+    model,
+    mode,
+    setMode,
+  } = useChatStore();
   const workspaceName = useWorkspaceStore((s) => s.name);
   const hasWorkspace = useWorkspaceStore((s) => s.root !== null);
   const { message } = App.useApp();
@@ -168,11 +233,14 @@ export function ChatView() {
 
       {terminalOpen && <TerminalPanel />}
 
-      {(sessionTokens > 0 || contextTokens !== null) && (
-        <div className="chat-status">
-          {contextTokens !== null && `当前上下文 ${contextTokens.toLocaleString()} tokens · `}
-          本会话累计输出 {sessionTokens.toLocaleString()} tokens
-        </div>
+      {(sessionTokens > 0 || sessionInputTokens > 0 || contextTokens !== null) && (
+        <ContextStatusBar
+          model={model}
+          contextTokens={contextTokens}
+          turnTokens={turnInputTokens + turnOutputTokens}
+          sessionTokens={sessionInputTokens + sessionTokens}
+          streaming={streaming}
+        />
       )}
 
       {mentions.length > 0 && (

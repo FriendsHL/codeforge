@@ -33,6 +33,12 @@ export type AgentEvent =
       outputTokens: number | null;
     }
   | { type: "contextCompacted"; note: string }
+  | {
+      type: "usage";
+      callInput: number;
+      callOutput: number;
+      contextTokens: number;
+    }
   | { type: "error"; message: string };
 
 export interface WorkspaceInfo {

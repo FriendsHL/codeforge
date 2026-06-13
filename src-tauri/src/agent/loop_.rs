@@ -206,6 +206,9 @@ async fn loop_body(
         }
 
         let mut final_text = String::new();
+        // 本轮已 read_file 过的文件（read-before-edit 闸门 + 重复读去重）
+        let read_files: std::sync::Arc<std::sync::Mutex<std::collections::HashSet<String>>> =
+            std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashSet::new()));
 
         for iteration in 0..MAX_ITERATIONS {
             // 任务清单作为 system-reminder 拼在 system 末尾（随清单变化，故每轮重建）
@@ -219,13 +222,19 @@ async fn loop_body(
                     history.push(HistoryItem::User(q));
                 }
             }
-            // 轮内压缩：把超出预算的旧工具结果替换为占位（保留"读过什么"的索引）
+            // 轮内压缩：先微压缩（重复读去重，无损），再按预算清理旧结果
             if iteration > 0 {
+                let deduped = dedup_reads(&mut history);
                 let pruned = prune_tool_results(&mut history);
-                if pruned > 0 && is_main {
-                    on_event(AgentEvent::ContextCompacted {
-                        note: format!("已清理 {pruned} 个较早的工具结果原文（超出轮内预算）"),
-                    });
+                if (deduped + pruned) > 0 && is_main {
+                    let mut parts = Vec::new();
+                    if deduped > 0 {
+                        parts.push(format!("去重 {deduped} 次重复读取"));
+                    }
+                    if pruned > 0 {
+                        parts.push(format!("清理 {pruned} 个超预算的较早结果"));
+                    }
+                    on_event(AgentEvent::ContextCompacted { note: parts.join("，") });
                 }
             }
             if is_cancelled(ctx) {
@@ -288,6 +297,18 @@ async fn loop_body(
             let output_tokens = turn.output_tokens;
             let tool_calls = turn.tool_calls.clone();
 
+            // 每次 LLM 调用都上报用量：前端累加 session 总花费、刷新本轮花费和上下文占用条。
+            // 子 agent 的调用不直接计入主会话面板（其汇报已折算进父 agent 的后续调用）。
+            if is_main {
+                if let (Some(ci), Some(co)) = (input_tokens, output_tokens) {
+                    on_event(AgentEvent::Usage {
+                        call_input: ci,
+                        call_output: co,
+                        context_tokens: ci,
+                    });
+                }
+            }
+
             history.push(HistoryItem::Assistant {
                 text: turn.text,
                 tool_calls: tool_calls.clone(),
@@ -329,16 +350,16 @@ async fn loop_body(
                     }
                     let group = &tool_calls[start..idx];
                     if group.len() == 1 {
-                        history.push(execute_call(ctx, id_prefix, &group[0], on_event, run_span, is_main).await);
+                        history.push(execute_call(ctx, id_prefix, &group[0], on_event, run_span, is_main, &read_files).await);
                     } else {
                         let results = futures_util::future::join_all(
-                            group.iter().map(|c| execute_call(ctx, id_prefix, c, on_event, run_span, is_main)),
+                            group.iter().map(|c| execute_call(ctx, id_prefix, c, on_event, run_span, is_main, &read_files)),
                         )
                         .await;
                         history.extend(results);
                     }
                 } else {
-                    history.push(execute_call(ctx, id_prefix, &tool_calls[idx], on_event, run_span, is_main).await);
+                    history.push(execute_call(ctx, id_prefix, &tool_calls[idx], on_event, run_span, is_main, &read_files).await);
                     idx += 1;
                 }
             }
@@ -357,6 +378,7 @@ async fn execute_call(
     on_event: &EventSink<'_>,
     run_span: Option<&str>,
     is_main: bool,
+    read_files: &std::sync::Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
 ) -> HistoryItem {
     let event_id = format!("{id_prefix}{}", call.id);
     let input: Value =
@@ -366,6 +388,26 @@ async fn execute_call(
         name: call.name.clone(),
         input: input.clone(),
     });
+
+    // read-before-edit 闸门：没读过就不准凭记忆改文件，避免幻觉式 edit 把文件改坏
+    if let Some(rejection) = {
+        let set = read_files.lock().unwrap();
+        check_read_before_edit(call, &set)
+    } {
+        on_event(AgentEvent::ToolCallEnd {
+            id: event_id,
+            output: preview(&rejection),
+            is_error: true,
+            duration_ms: 0,
+            checkpoint_id: None,
+        });
+        return HistoryItem::ToolResult {
+            call_id: call.id.clone(),
+            name: call.name.clone(),
+            content: rejection,
+            is_error: true,
+        };
+    }
 
     let checkpoint_id = maybe_capture_checkpoint(ctx, &event_id, &call.name, &input);
     let started = std::time::Instant::now();
@@ -384,6 +426,13 @@ async fn execute_call(
         Ok(content) => (content, false),
         Err(message) => (message, true),
     };
+
+    // 成功读过的文件登记进集合，作为后续 edit 的前置许可
+    if !is_error && call.name == "read_file" {
+        if let Some(path) = tool_path(call) {
+            read_files.lock().unwrap().insert(path);
+        }
+    }
     let checkpoint_id = if is_error { None } else { checkpoint_id };
 
     if let Some(tracer) = &ctx.trace {
@@ -575,6 +624,28 @@ async fn execute_tool(
     handle.await.map_err(|e| format!("工具执行崩溃: {e}"))?
 }
 
+/// 从工具调用里抽出它读/改的文件相对路径（read_file/edit_file/write_file 都有 path 参数）
+fn tool_path(call: &ToolCall) -> Option<String> {
+    let input: Value = serde_json::from_str(&call.arguments).ok()?;
+    input["path"].as_str().map(|s| s.to_string())
+}
+
+/// read-before-edit 闸门：edit_file 前必须在本轮 read 过该文件。
+/// 给 LLM 一个明确指引而非靠 old_string 匹配失败的隐晦报错。
+fn check_read_before_edit(call: &ToolCall, read_files: &std::collections::HashSet<String>) -> Option<String> {
+    if call.name != "edit_file" {
+        return None;
+    }
+    let path = tool_path(call)?;
+    if read_files.contains(&path) {
+        None
+    } else {
+        Some(format!(
+            "edit_file 被拒绝：你还没在本次会话用 read_file 读过 {path}，不能凭记忆修改。请先 read_file {path} 看清当前内容，再发起精确的 edit。"
+        ))
+    }
+}
+
 // 轮内压缩参数
 const SINGLE_RESULT_MAX: usize = 16_000; // 单结果超此值 → 中段截断
 const SINGLE_RESULT_HEAD: usize = 6_000;
@@ -641,6 +712,62 @@ fn prune_tool_results(history: &mut [HistoryItem]) -> usize {
         }
     }
     pruned
+}
+
+/// 微压缩：同一文件被 read_file 多次时，只有最后一次内容是当前的。
+/// 把更早的那几次结果替换为指向最新版本的占位，无损地省下重复正文。
+/// 返回被去重的条数。
+fn dedup_reads(history: &mut [HistoryItem]) -> usize {
+    // call_id → 它读的文件路径（只看 read_file 调用）
+    let mut read_call_path: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
+    for item in history.iter() {
+        if let HistoryItem::Assistant { tool_calls, .. } = item {
+            for c in tool_calls {
+                if c.name == "read_file" {
+                    if let Some(p) = tool_path(c) {
+                        read_call_path.insert(c.id.clone(), p);
+                    }
+                }
+            }
+        }
+    }
+
+    // 每个路径最后一次成功 read 的结果下标 → 受保护，其余去重
+    let mut latest: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for (idx, item) in history.iter().enumerate() {
+        if let HistoryItem::ToolResult { call_id, content, is_error, .. } = item {
+            if *is_error || content.starts_with(PRUNED_MARK) {
+                continue;
+            }
+            if let Some(path) = read_call_path.get(call_id) {
+                latest.insert(path.clone(), idx);
+            }
+        }
+    }
+
+    let mut deduped = 0usize;
+    for idx in 0..history.len() {
+        let path = match &history[idx] {
+            HistoryItem::ToolResult { call_id, content, is_error, .. }
+                if !*is_error && !content.starts_with(PRUNED_MARK) =>
+            {
+                read_call_path.get(call_id).cloned()
+            }
+            _ => None,
+        };
+        let Some(path) = path else { continue };
+        if latest.get(&path) == Some(&idx) {
+            continue; // 最新一次，保留
+        }
+        if let HistoryItem::ToolResult { content, .. } = &mut history[idx] {
+            *content = format!(
+                "{PRUNED_MARK} {path} 的这次读取已被后续更新的 read_file 取代，正文以最新一次为准"
+            );
+            deduped += 1;
+        }
+    }
+    deduped
 }
 
 fn preview(content: &str) -> String {
@@ -730,6 +857,65 @@ mod tests {
         let before = history.len();
         prune_tool_results(&mut history);
         assert_eq!(history.len(), before);
+    }
+
+    fn read_call(id: &str, path: &str) -> ToolCall {
+        ToolCall { id: id.into(), name: "read_file".into(), arguments: format!("{{\"path\":\"{path}\"}}") }
+    }
+
+    fn read_result(call_id: &str, content: &str) -> HistoryItem {
+        HistoryItem::ToolResult {
+            call_id: call_id.into(),
+            name: "read_file".into(),
+            content: content.into(),
+            is_error: false,
+        }
+    }
+
+    #[test]
+    fn dedup_reads_keeps_only_latest_per_file() {
+        let mut history = vec![
+            HistoryItem::Assistant { text: String::new(), tool_calls: vec![read_call("c1", "a.rs")] },
+            read_result("c1", "first version of a.rs"),
+            HistoryItem::Assistant { text: String::new(), tool_calls: vec![read_call("c2", "b.rs")] },
+            read_result("c2", "content of b.rs"),
+            HistoryItem::Assistant { text: String::new(), tool_calls: vec![read_call("c3", "a.rs")] },
+            read_result("c3", "second version of a.rs"),
+        ];
+        let n = dedup_reads(&mut history);
+        assert_eq!(n, 1, "a.rs 读了两次，第一次应被去重");
+        match &history[1] {
+            HistoryItem::ToolResult { content, .. } => {
+                assert!(content.starts_with(PRUNED_MARK), "旧读取应被替换为占位");
+                assert!(content.contains("a.rs"));
+            }
+            _ => panic!(),
+        }
+        // b.rs 唯一一次读取，保留
+        match &history[3] {
+            HistoryItem::ToolResult { content, .. } => assert_eq!(content, "content of b.rs"),
+            _ => panic!(),
+        }
+        // a.rs 最新一次读取，保留
+        match &history[5] {
+            HistoryItem::ToolResult { content, .. } => assert_eq!(content, "second version of a.rs"),
+            _ => panic!(),
+        }
+        // 幂等
+        assert_eq!(dedup_reads(&mut history), 0);
+    }
+
+    #[test]
+    fn read_before_edit_gate_blocks_unread_file() {
+        let edit = ToolCall {
+            id: "e1".into(),
+            name: "edit_file".into(),
+            arguments: "{\"path\":\"x.rs\",\"old_string\":\"a\",\"new_string\":\"b\"}".into(),
+        };
+        let mut set = std::collections::HashSet::new();
+        assert!(check_read_before_edit(&edit, &set).is_some(), "未读过应被拒绝");
+        set.insert("x.rs".to_string());
+        assert!(check_read_before_edit(&edit, &set).is_none(), "读过后应放行");
     }
 
     /// 真实 API 集成测试：cargo test live_agent_loop -- --ignored --nocapture

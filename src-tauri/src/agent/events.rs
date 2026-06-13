@@ -40,6 +40,15 @@ pub enum AgentEvent {
         input_tokens: Option<u64>,
         output_tokens: Option<u64>,
     },
+    /// 单次 LLM 调用的 token 用量（每个 agent 迭代都发一次）。
+    /// call_* 是本次调用增量；context_tokens 是本次的输入规模(≈当前上下文占用)。
+    /// 前端据此累加 session 总量、刷新本轮花费与上下文占用条。
+    #[serde(rename_all = "camelCase")]
+    Usage {
+        call_input: u64,
+        call_output: u64,
+        context_tokens: u64,
+    },
     /// 上下文压缩发生时的提示（前端显示为系统注记）
     #[serde(rename_all = "camelCase")]
     ContextCompacted { note: String },

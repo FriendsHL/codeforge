@@ -129,6 +129,10 @@ body {
   color: var(--cf-text-dim);
 }
 
+[data-theme="dark"] .chat-status-bar {
+  background: #333;
+}
+
 .app-layout {
   display: flex;
   flex-direction: column;
@@ -478,11 +482,36 @@ body.resizing {
 }
 
 .chat-status {
-  text-align: right;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 14px;
   font-size: 11px;
-  color: #bbb;
-  padding: 2px 16px 0;
+  color: #999;
+  padding: 3px 16px 0;
   background: #fff;
+}
+
+.chat-status-ctx {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chat-status-bar {
+  display: inline-block;
+  width: 60px;
+  height: 6px;
+  border-radius: 3px;
+  background: #eee;
+  overflow: hidden;
+}
+
+.chat-status-bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s ease, background 0.3s ease;
 }
 
 .terminal-panel {

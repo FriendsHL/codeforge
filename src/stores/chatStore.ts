@@ -160,6 +160,12 @@ interface ChatState {
   currentSessionId: number | null;
   /** 本会话累计输出 tokens（仅 UI 提示用） */
   sessionTokens: number;
+  /** 本会话累计输入 tokens（每次 LLM 调用都计，反映真实花费） */
+  sessionInputTokens: number;
+  /** 本轮（最近一次 send 起）累计输入 tokens */
+  turnInputTokens: number;
+  /** 本轮累计输出 tokens */
+  turnOutputTokens: number;
   /** 最近一次请求的真实上下文大小（API usage.input_tokens） */
   contextTokens: number | null;
   setModel: (model: string) => void;
@@ -179,6 +185,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
   mode: (localStorage.getItem("codeforge.mode") as import("../lib/ipc").AgentMode) || "ask",
   currentSessionId: null,
   sessionTokens: 0,
+  sessionInputTokens: 0,
+  turnInputTokens: 0,
+  turnOutputTokens: 0,
   contextTokens: null,
 
   setModel: (model) => {
@@ -333,6 +342,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
       items: [...items, { kind: "msg", role: "user", content: text, mentions }],
       streaming: true,
       error: null,
+      // 新回合：本轮花费清零（session 累计不动）
+      turnInputTokens: 0,
+      turnOutputTokens: 0,
     });
 
     const update = (updater: (items: ChatItem[]) => ChatItem[]) =>
@@ -425,13 +437,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
               return items;
             });
             break;
+          case "usage":
+            // 每次 LLM 调用上报一次：累加 session 总量与本轮花费，刷新上下文占用
+            set((s) => ({
+              sessionInputTokens: s.sessionInputTokens + event.callInput,
+              sessionTokens: s.sessionTokens + event.callOutput,
+              turnInputTokens: s.turnInputTokens + event.callInput,
+              turnOutputTokens: s.turnOutputTokens + event.callOutput,
+              contextTokens: event.contextTokens,
+            }));
+            break;
           case "turnEnd":
-            if (event.outputTokens) {
-              set((s) => ({ sessionTokens: s.sessionTokens + (event.outputTokens ?? 0) }));
-            }
-            if (event.inputTokens) {
-              set({ contextTokens: event.inputTokens });
-            }
+            // token 累加已在 usage 事件处理；这里只处理停止原因
             // 把"为什么停"显式标注出来，不再让用户猜
             if (event.stopReason === "length" || event.stopReason === "max_tokens") {
               appendToAssistant({

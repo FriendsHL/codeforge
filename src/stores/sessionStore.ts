@@ -47,6 +47,10 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       currentSessionId: id,
       error: null,
       sessionTokens: 0,
+      sessionInputTokens: 0,
+      turnInputTokens: 0,
+      turnOutputTokens: 0,
+      contextTokens: null,
       terminalOpen: false,
     });
   },
@@ -57,6 +61,10 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       currentSessionId: null,
       error: null,
       sessionTokens: 0,
+      sessionInputTokens: 0,
+      turnInputTokens: 0,
+      turnOutputTokens: 0,
+      contextTokens: null,
       terminalOpen: false,
     });
   },

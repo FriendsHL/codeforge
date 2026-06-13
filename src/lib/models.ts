@@ -38,3 +38,22 @@ export function splitModelValue(value: string): { provider: string; model: strin
   const slash = value.indexOf("/");
   return { provider: value.slice(0, slash), model: value.slice(slash + 1) };
 }
+
+// 各模型大致的上下文窗口（tokens），用于在界面上把"当前上下文占用"换算成百分比。
+// 取保守值，不必精确——只为给用户一个"还剩多少空间"的直觉。
+const CONTEXT_WINDOWS: Record<string, number> = {
+  "claude-opus-4-8": 1_000_000,
+  "claude-sonnet-4-6": 1_000_000,
+  "claude-haiku-4-5": 200_000,
+  "minimax-latest": 1_000_000,
+  "deepseek-v4-pro": 128_000,
+  "glm-5.1": 200_000,
+};
+
+const DEFAULT_CONTEXT_WINDOW = 256_000;
+
+/** 给定 "<provider>/<model>" 或裸 model 名，返回其上下文窗口大小（tokens） */
+export function contextWindowFor(value: string): number {
+  const model = value.includes("/") ? splitModelValue(value).model : value;
+  return CONTEXT_WINDOWS[model] ?? DEFAULT_CONTEXT_WINDOW;
+}
