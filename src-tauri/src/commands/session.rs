@@ -63,3 +63,17 @@ pub fn save_session_items(
 ) -> Result<(), String> {
     state.0.save_items(id, &items)
 }
+
+#[tauri::command]
+pub fn load_session_stats(id: i64, state: State<'_, SessionState>) -> Result<String, String> {
+    state.0.load_stats(id)
+}
+
+#[tauri::command]
+pub fn save_session_stats(
+    id: i64,
+    stats: String,
+    state: State<'_, SessionState>,
+) -> Result<(), String> {
+    state.0.save_stats(id, &stats)
+}

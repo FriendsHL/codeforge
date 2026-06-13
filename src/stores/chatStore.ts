@@ -4,6 +4,7 @@ import {
   createSession,
   listCapabilities,
   saveSessionItems,
+  saveSessionStats,
   sendMessage,
 } from "../lib/ipc";
 import { invoke } from "@tauri-apps/api/core";
@@ -481,10 +482,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // 每轮结束刷新 git 状态（用户可能在外部改了文件；M3 写能力上线后 agent 也会改）
       void useGitStore.getState().refresh();
       // 持久化本轮完整对话
-      const { currentSessionId, items: finalItems } = get();
+      const s = get();
+      const { currentSessionId, items: finalItems } = s;
       if (currentSessionId !== null) {
         try {
           await saveSessionItems(currentSessionId, JSON.stringify(finalItems));
+          // 会话级 token 统计一并持久化，重启/切回会话后还原
+          await saveSessionStats(
+            currentSessionId,
+            JSON.stringify({
+              sessionInputTokens: s.sessionInputTokens,
+              sessionTokens: s.sessionTokens,
+              sessionCacheTokens: s.sessionCacheTokens,
+              contextTokens: s.contextTokens,
+            }),
+          );
           void useSessionStore.getState().refresh();
         } catch {
           // 持久化失败不打断对话

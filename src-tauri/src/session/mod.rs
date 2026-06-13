@@ -48,6 +48,8 @@ impl SessionStore {
         .map_err(|e| format!("初始化表失败: {e}"))?;
         // v1.2 迁移：会话关联项目（列已存在时报错可忽略）
         let _ = conn.execute("ALTER TABLE sessions ADD COLUMN workspace_root TEXT", []);
+        // v4-8 迁移：会话级 token 统计（累计花费/缓存/上下文），JSON blob
+        let _ = conn.execute("ALTER TABLE sessions ADD COLUMN stats TEXT", []);
         Ok(Self { conn: Mutex::new(conn) })
     }
 
@@ -152,6 +154,35 @@ impl SessionStore {
             .map_err(|e| format!("会话不存在: {e}"))
     }
 
+    /// 读取会话级 token 统计（JSON），无记录时返回 "{}"
+    pub fn load_stats(&self, id: i64) -> Result<String, String> {
+        let stats: Option<String> = self
+            .conn
+            .lock()
+            .unwrap()
+            .query_row("SELECT stats FROM sessions WHERE id = ?1", [id], |r| r.get(0))
+            .map_err(|e| format!("会话不存在: {e}"))?;
+        Ok(stats.unwrap_or_else(|| "{}".into()))
+    }
+
+    /// 保存会话级 token 统计（JSON object）。不刷新 updated_at，避免把会话顶到列表最前。
+    pub fn save_stats(&self, id: i64, stats_json: &str) -> Result<(), String> {
+        let parsed: serde_json::Value =
+            serde_json::from_str(stats_json).map_err(|e| format!("stats 不是合法 JSON: {e}"))?;
+        if !parsed.is_object() {
+            return Err("stats 必须是 JSON 对象".into());
+        }
+        self.conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE sessions SET stats = ?1 WHERE id = ?2",
+                rusqlite::params![stats_json, id],
+            )
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
     pub fn save_items(&self, id: i64, items_json: &str) -> Result<(), String> {
         // 防御：必须是合法 JSON 数组，避免坏数据破坏会话
         let parsed: serde_json::Value =
@@ -206,6 +237,25 @@ mod tests {
         let items = r#"[{"kind":"msg","role":"user","content":"你好"}]"#;
         store.save_items(s.id, items).unwrap();
         assert_eq!(store.load_items(s.id).unwrap(), items);
+    }
+
+    #[test]
+    fn save_and_load_stats_roundtrip() {
+        let (_dir, store) = store();
+        let s = store.create("t", None).unwrap();
+        // 未保存时默认空对象
+        assert_eq!(store.load_stats(s.id).unwrap(), "{}");
+        let stats = r#"{"sessionInputTokens":1200,"sessionTokens":340,"sessionCacheTokens":800,"contextTokens":1500}"#;
+        store.save_stats(s.id, stats).unwrap();
+        assert_eq!(store.load_stats(s.id).unwrap(), stats);
+    }
+
+    #[test]
+    fn save_stats_rejects_non_object() {
+        let (_dir, store) = store();
+        let s = store.create("t", None).unwrap();
+        assert!(store.save_stats(s.id, "[]").is_err());
+        assert!(store.save_stats(s.id, "not json").is_err());
     }
 
     #[test]

@@ -160,3 +160,17 @@ export const loadSessionItems = (id: number) =>
 
 export const saveSessionItems = (id: number, items: string) =>
   invoke<void>("save_session_items", { id, items });
+
+/** 会话级 token 统计，跨重启持久 */
+export interface SessionStats {
+  sessionInputTokens?: number;
+  sessionTokens?: number;
+  sessionCacheTokens?: number;
+  contextTokens?: number | null;
+}
+
+export const loadSessionStats = (id: number) =>
+  invoke<string>("load_session_stats", { id });
+
+export const saveSessionStats = (id: number, stats: string) =>
+  invoke<void>("save_session_stats", { id, stats });

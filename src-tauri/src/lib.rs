@@ -91,6 +91,8 @@ pub fn run() {
             commands::session::delete_session,
             commands::session::load_session_items,
             commands::session::save_session_items,
+            commands::session::load_session_stats,
+            commands::session::save_session_stats,
             commands::session::list_projects,
             commands::session::remove_project,
             commands::info::list_capabilities,

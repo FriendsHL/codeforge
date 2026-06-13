@@ -4,10 +4,12 @@ import {
   listProjects,
   listSessions,
   loadSessionItems,
+  loadSessionStats,
   ProjectMeta,
   removeProject,
   renameSession,
   SessionMeta,
+  SessionStats,
 } from "../lib/ipc";
 import { useChatStore } from "./chatStore";
 import { useWorkspaceStore } from "./workspaceStore";
@@ -42,16 +44,23 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       await useWorkspaceStore.getState().switchTo(meta.workspaceRoot);
     }
     const json = await loadSessionItems(id);
+    // 还原该会话上次的累计花费/缓存/上下文（持久化的会话级统计）
+    let stats: SessionStats = {};
+    try {
+      stats = JSON.parse(await loadSessionStats(id)) as SessionStats;
+    } catch {
+      // 旧会话无 stats，留空
+    }
     useChatStore.setState({
       items: JSON.parse(json),
       currentSessionId: id,
       error: null,
-      sessionTokens: 0,
-      sessionInputTokens: 0,
-      sessionCacheTokens: 0,
+      sessionTokens: stats.sessionTokens ?? 0,
+      sessionInputTokens: stats.sessionInputTokens ?? 0,
+      sessionCacheTokens: stats.sessionCacheTokens ?? 0,
       turnInputTokens: 0,
       turnOutputTokens: 0,
-      contextTokens: null,
+      contextTokens: stats.contextTokens ?? null,
       terminalOpen: false,
     });
   },
