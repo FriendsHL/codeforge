@@ -880,6 +880,57 @@ mod tests {
     use super::*;
     use crate::llm::registry;
 
+    /// 给定角色名的离线 ctx（不读 key，仅用于不触网的执行期逻辑测试）
+    fn ctx_with_role(workspace: Option<PathBuf>, role: &str) -> AgentCtx {
+        let endpoint = registry::resolve("ark").unwrap();
+        let role = crate::agents::resolve(workspace.as_deref(), role).map(Arc::new);
+        assert!(role.is_some(), "角色应存在");
+        AgentCtx {
+            endpoint,
+            api_key: String::new(),
+            model: "doubao-seed-2.0-pro".into(),
+            registry: Arc::new(ToolRegistry::builtin()),
+            workspace,
+            permissions: Arc::new(PermissionManager::default()),
+            mode: AgentMode::Auto,
+            cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            provider: "ark".into(),
+            trace: None,
+            todos: Arc::new(std::sync::Mutex::new(Vec::new())),
+            app_data: None,
+            session_id: None,
+            pending: Arc::new(std::sync::Mutex::new(Vec::new())),
+            role,
+        }
+    }
+
+    /// 功能验证：review 角色在执行期真的拦截 edit_file（不止是 spec 过滤）
+    #[tokio::test]
+    async fn review_role_blocks_edit_at_execution() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("f.txt"), "原始内容\n").unwrap();
+        let ctx = ctx_with_role(Some(dir.path().to_path_buf()), "review");
+
+        let call = ToolCall {
+            id: "e1".into(),
+            name: "edit_file".into(),
+            arguments: "{\"path\":\"f.txt\",\"old_string\":\"原始内容\",\"new_string\":\"被篡改\"}".into(),
+        };
+        let read_files = Arc::new(std::sync::Mutex::new(std::collections::HashSet::new()));
+        let sink = |_e: AgentEvent| {};
+        let result = execute_call(&ctx, "", &call, &sink, None, true, &read_files).await;
+
+        match result {
+            HistoryItem::ToolResult { is_error, content, .. } => {
+                assert!(is_error, "review 角色调 edit_file 应被拒绝");
+                assert!(content.contains("review"), "拒绝信息应点明当前角色：{content}");
+            }
+            _ => panic!("应返回 ToolResult"),
+        }
+        // 关键：文件内容没被改动，证明拦截发生在执行之前
+        assert_eq!(std::fs::read_to_string(dir.path().join("f.txt")).unwrap(), "原始内容\n");
+    }
+
     fn ark_ctx(workspace: Option<PathBuf>) -> AgentCtx {
         let endpoint = registry::resolve("ark").unwrap();
         let api_key = registry::api_key_for(&endpoint).unwrap();
