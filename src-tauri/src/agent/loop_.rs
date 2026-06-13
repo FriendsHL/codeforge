@@ -229,26 +229,27 @@ async fn loop_body(
                             None,
                         );
                     }
-                    Err(e) if e == crate::llm::types::CANCELLED_ERR => {}
+                    Err(e) if e.is_cancelled() => {}
                     Err(e) => {
                         tracer.span(
                             &format!("chat {}", ctx.model),
                             run_span,
                             llm_start,
                             json!({"gen_ai.system": ctx.provider, "gen_ai.request.model": ctx.model}),
-                            Some(e),
+                            Some(&e.user_message()),
                         );
                     }
                 }
             }
             let turn = match call_result {
-                Err(e) if e == crate::llm::types::CANCELLED_ERR => {
+                Err(e) if e.is_cancelled() => {
                     if is_main {
                         on_event(AgentEvent::TurnEnd { stop_reason: Some("cancelled".into()), input_tokens: None, output_tokens: None });
                     }
                     return Ok(final_text);
                 }
-                other => other?,
+                Err(e) => return Err(e.user_message()),
+                Ok(turn) => turn,
             };
 
             if !turn.text.is_empty() {
@@ -416,7 +417,7 @@ async fn call_llm(
     history: &[HistoryItem],
     tools: &[ToolSpec],
     on_event: &EventSink<'_>,
-) -> Result<AssistantTurn, String> {
+) -> Result<AssistantTurn, crate::llm::types::LlmError> {
     let on_delta = |delta: LlmDelta| match delta {
         LlmDelta::Text(text) => on_event(AgentEvent::TextDelta { text }),
         LlmDelta::Reasoning(text) => on_event(AgentEvent::ReasoningDelta { text }),

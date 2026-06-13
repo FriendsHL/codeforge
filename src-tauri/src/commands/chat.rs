@@ -181,12 +181,13 @@ async fn summarize_messages(
     let cheap = cheap_model_for(provider);
     let turn = match endpoint {
         registry::Endpoint::Anthropic => {
-            crate::llm::anthropic::stream_chat(api_key, cheap, Some(COMPACT_SYSTEM), &summary_history, &[], cancel, |_| {}).await?
+            crate::llm::anthropic::stream_chat(api_key, cheap, Some(COMPACT_SYSTEM), &summary_history, &[], cancel, |_| {}).await
         }
         registry::Endpoint::OpenAiCompatible { chat_url, .. } => {
-            crate::llm::openai::stream_chat(chat_url, api_key, cheap, Some(COMPACT_SYSTEM), &summary_history, &[], cancel, |_| {}).await?
+            crate::llm::openai::stream_chat(chat_url, api_key, cheap, Some(COMPACT_SYSTEM), &summary_history, &[], cancel, |_| {}).await
         }
-    };
+    }
+    .map_err(|e| e.user_message())?;
     if turn.text.trim().is_empty() {
         return Err("摘要为空".into());
     }

@@ -5,7 +5,7 @@ use futures_util::StreamExt;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use super::types::{AssistantTurn, HistoryItem, LlmDelta, ToolCall, ToolSpec};
+use super::types::{AssistantTurn, HistoryItem, LlmDelta, LlmError, ToolCall, ToolSpec};
 
 #[derive(Debug, Deserialize)]
 struct StreamChunk {
@@ -161,7 +161,7 @@ pub async fn stream_chat(
     tools: &[ToolSpec],
     cancel: &std::sync::atomic::AtomicBool,
     mut on_delta: impl FnMut(LlmDelta),
-) -> Result<AssistantTurn, String> {
+) -> Result<AssistantTurn, LlmError> {
     // 不设 max_tokens 会落到 provider 默认值（火山仅 4K，长回答被静默截断）；
     // include_usage 让最后一个 chunk 携带真实 token 用量
     let mut body = json!({
@@ -182,7 +182,7 @@ pub async fn stream_chat(
         .json(&body)
         .send()
         .await
-        .map_err(|e| super::types::friendly_send_error(&e))?;
+        .map_err(|e| LlmError::from_send(&e))?;
 
     if !response.status().is_success() {
         let status = response.status();
@@ -196,7 +196,7 @@ pub async fn stream_chat(
                     .map(String::from)
             })
             .unwrap_or(text);
-        return Err(super::types::friendly_status_error(status.as_u16(), &message));
+        return Err(LlmError::from_status(status.as_u16(), &message));
     }
 
     let mut turn = AssistantTurn::default();
@@ -205,14 +205,14 @@ pub async fn stream_chat(
     let mut stream = response.bytes_stream().eventsource();
     while let Some(event) = stream.next().await {
         if cancel.load(std::sync::atomic::Ordering::Relaxed) {
-            return Err(crate::llm::types::CANCELLED_ERR.into());
+            return Err(LlmError::Cancelled);
         }
-        let event = event.map_err(|e| format!("流读取失败: {e}"))?;
+        let event = event.map_err(|e| LlmError::Network(format!("流读取失败: {e}")))?;
         if event.data.trim() == "[DONE]" {
             break;
         }
         let chunk: StreamChunk =
-            serde_json::from_str(&event.data).map_err(|e| format!("响应解析失败: {e}"))?;
+            serde_json::from_str(&event.data).map_err(|e| LlmError::Parse(e.to_string()))?;
         if let Some(usage) = chunk.usage {
             if usage.completion_tokens.is_some() {
                 turn.output_tokens = usage.completion_tokens;

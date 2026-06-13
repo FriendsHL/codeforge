@@ -5,7 +5,7 @@ use futures_util::StreamExt;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use super::types::{AssistantTurn, HistoryItem, LlmDelta, ToolCall, ToolSpec};
+use super::types::{AssistantTurn, HistoryItem, LlmDelta, LlmError, ToolCall, ToolSpec};
 
 const API_URL: &str = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION: &str = "2023-06-01";
@@ -192,7 +192,7 @@ pub async fn stream_chat(
     tools: &[ToolSpec],
     cancel: &std::sync::atomic::AtomicBool,
     mut on_delta: impl FnMut(LlmDelta),
-) -> Result<AssistantTurn, String> {
+) -> Result<AssistantTurn, LlmError> {
     let mut messages = to_wire_messages(history);
     attach_cache_control_to_last(&mut messages);
 
@@ -233,7 +233,7 @@ pub async fn stream_chat(
         .json(&body)
         .send()
         .await
-        .map_err(|e| super::types::friendly_send_error(&e))?;
+        .map_err(|e| LlmError::from_send(&e))?;
 
     if !response.status().is_success() {
         let status = response.status();
@@ -242,7 +242,7 @@ pub async fn stream_chat(
             .ok()
             .and_then(|v| v["error"]["message"].as_str().map(String::from))
             .unwrap_or(text);
-        return Err(super::types::friendly_status_error(status.as_u16(), &message));
+        return Err(LlmError::from_status(status.as_u16(), &message));
     }
 
     let mut turn = AssistantTurn::default();
@@ -251,11 +251,11 @@ pub async fn stream_chat(
     let mut stream = response.bytes_stream().eventsource();
     while let Some(event) = stream.next().await {
         if cancel.load(std::sync::atomic::Ordering::Relaxed) {
-            return Err(crate::llm::types::CANCELLED_ERR.into());
+            return Err(LlmError::Cancelled);
         }
-        let event = event.map_err(|e| format!("流读取失败: {e}"))?;
+        let event = event.map_err(|e| LlmError::Network(format!("流读取失败: {e}")))?;
         let data: SseData =
-            serde_json::from_str(&event.data).map_err(|e| format!("响应解析失败: {e}"))?;
+            serde_json::from_str(&event.data).map_err(|e| LlmError::Parse(e.to_string()))?;
 
         match data.event_type.as_str() {
             "message_start" => {
@@ -305,10 +305,9 @@ pub async fn stream_chat(
                 }
             }
             "error" => {
-                return Err(data
-                    .error
-                    .map(|e| e.message)
-                    .unwrap_or_else(|| "API 返回未知错误".into()));
+                return Err(LlmError::Api(
+                    data.error.map(|e| e.message).unwrap_or_else(|| "API 返回未知错误".into()),
+                ));
             }
             _ => {} // message_start / content_block_stop / message_stop / ping
         }

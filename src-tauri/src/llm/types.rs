@@ -1,27 +1,68 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-/// 用户主动停止的标记错误（loop 捕获后优雅收尾，不当成真错误）
-pub const CANCELLED_ERR: &str = "__CF_CANCELLED__";
+/// LLM 调用的类型化错误：上层据此区分"用户取消 / 网络 / 鉴权 / 限流 / 服务端…"，
+/// 不再靠字符串匹配。每个变体都能产出给用户看的友好中文。
+#[derive(Debug, Clone)]
+pub enum LlmError {
+    /// 用户主动停止
+    Cancelled,
+    /// 连接失败 / 超时（网络、代理、服务不可达）
+    Network(String),
+    /// 401/403 鉴权
+    Auth(String),
+    /// 429 限流 / 配额
+    RateLimit(String),
+    /// 5xx 服务端
+    Server(String),
+    /// 其他 HTTP 错误
+    Api(String),
+    /// 响应解析 / 流读取失败
+    Parse(String),
+}
 
-/// 把 reqwest 发送错误转成给用户看的友好中文提示
-pub fn friendly_send_error(e: &reqwest::Error) -> String {
-    if e.is_timeout() {
-        "请求超时：模型服务长时间无响应，请稍后重试或检查网络/代理".into()
-    } else if e.is_connect() {
-        "无法连接到模型服务：请检查网络连接、代理设置，或确认服务地址可达".into()
-    } else {
-        format!("请求失败：{e}")
+impl LlmError {
+    pub fn is_cancelled(&self) -> bool {
+        matches!(self, LlmError::Cancelled)
+    }
+
+    /// 给用户看的友好中文提示
+    pub fn user_message(&self) -> String {
+        match self {
+            LlmError::Cancelled => "已停止".into(),
+            LlmError::Network(d) => format!("无法连接到模型服务：请检查网络/代理，或确认服务地址可达（{d}）"),
+            LlmError::Auth(d) => format!("API key 无效或无权限：请在设置中检查密钥。详情：{d}"),
+            LlmError::RateLimit(d) => format!("请求过于频繁或配额耗尽：请稍后再试或更换模型。详情：{d}"),
+            LlmError::Server(d) => format!("模型服务端错误：通常稍后重试即可。详情：{d}"),
+            LlmError::Api(d) => format!("API 错误：{d}"),
+            LlmError::Parse(d) => format!("响应解析失败：{d}"),
+        }
+    }
+
+    pub fn from_send(e: &reqwest::Error) -> Self {
+        if e.is_timeout() {
+            LlmError::Network(format!("超时：{e}"))
+        } else if e.is_connect() {
+            LlmError::Network(format!("连接失败：{e}"))
+        } else {
+            LlmError::Network(e.to_string())
+        }
+    }
+
+    pub fn from_status(status: u16, raw_message: &str) -> Self {
+        let m = format!("HTTP {status}: {raw_message}");
+        match status {
+            401 | 403 => LlmError::Auth(m),
+            429 => LlmError::RateLimit(m),
+            500..=599 => LlmError::Server(m),
+            _ => LlmError::Api(m),
+        }
     }
 }
 
-/// 把 HTTP 错误状态转成友好提示（401/403=鉴权，429=限流，5xx=服务端）
-pub fn friendly_status_error(status: u16, raw_message: &str) -> String {
-    match status {
-        401 | 403 => format!("API key 无效或无权限（HTTP {status}）：请在设置中检查密钥。详情：{raw_message}"),
-        429 => format!("请求过于频繁或配额耗尽（HTTP 429）：请稍后再试或更换模型。详情：{raw_message}"),
-        500..=599 => format!("模型服务端错误（HTTP {status}）：通常稍后重试即可。详情：{raw_message}"),
-        _ => format!("API 错误（HTTP {status}）：{raw_message}"),
+impl std::fmt::Display for LlmError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.user_message())
     }
 }
 
@@ -83,4 +124,31 @@ pub enum LlmDelta {
     Text(String),
     /// 推理模型的思考过程（doubao / mimo 等会先输出 reasoning_content）
     Reasoning(String),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn status_maps_to_typed_error() {
+        assert!(matches!(LlmError::from_status(401, "x"), LlmError::Auth(_)));
+        assert!(matches!(LlmError::from_status(403, "x"), LlmError::Auth(_)));
+        assert!(matches!(LlmError::from_status(429, "x"), LlmError::RateLimit(_)));
+        assert!(matches!(LlmError::from_status(503, "x"), LlmError::Server(_)));
+        assert!(matches!(LlmError::from_status(400, "x"), LlmError::Api(_)));
+    }
+
+    #[test]
+    fn cancelled_is_distinguishable() {
+        assert!(LlmError::Cancelled.is_cancelled());
+        assert!(!LlmError::Auth("x".into()).is_cancelled());
+    }
+
+    #[test]
+    fn user_message_is_friendly() {
+        assert!(LlmError::Auth("HTTP 401".into()).user_message().contains("API key"));
+        assert!(LlmError::RateLimit("x".into()).user_message().contains("频繁"));
+        assert!(LlmError::Network("timeout".into()).user_message().contains("网络"));
+    }
 }
