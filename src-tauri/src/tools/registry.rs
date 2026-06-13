@@ -85,6 +85,7 @@ impl ToolRegistry {
                 Arc::new(super::web::WebFetchTool),
                 Arc::new(super::web::WebSearchTool),
                 Arc::new(super::research::ResearchPlanTool),
+                Arc::new(super::agent_roles::ListAgentsTool),
             ],
         }
     }

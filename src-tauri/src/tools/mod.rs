@@ -1,3 +1,4 @@
+pub mod agent_roles;
 pub mod bash;
 pub mod browser;
 pub mod diagnostics;
