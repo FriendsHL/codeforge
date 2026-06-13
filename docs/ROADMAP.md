@@ -102,3 +102,15 @@ M1 是最薄的端到端打通，后面每步在其上叠加。
 - 每个 M 结束打 git tag（v0.1 ~ v0.6），README 的功能清单同步更新
 - Rust 是新语言：M1/M2 期间遇到所有权/生命周期问题，优先简单写法（clone 不丢人），先跑通再优化
 - 每完成一个工具，写一个 Rust 单元测试（`cargo test` 保持绿）
+
+## v4 方向(2026-06-13，基于 research-docs 能力缺口分析，详见 CAPABILITY-GAPS.md)
+
+目标升级为「能编码 + 能调研」。按 ROI：
+1. **记忆系统**(P0)：~/.codeforge/memory + memory_search 工具 + 项目 MEMORY.md → 六信号晋升 → prefetch；接 skillForge 飞轮
+2. **可靠性硬化**(P0)：错误类型化(enum AgentError)、panic 审查、前端关键测试
+3. **调研能力升级**(P0)：引用溯源、Generator-Verifier 自验证、多源综合、报告生成
+4. **LSP 集成**(P1)：diagnostic/hover/definition 喂给 edit/read/grep
+5. **工具并行**(P1)：只读工具并行、路径并发安全
+6. **上下文进阶**(P1)：microcompact 无损压缩、compact boundary+resume、read-before-edit 闸门
+7. **分发**(P2)：签名公证 + tauri-updater 自动更新
+8. **自进化 + 面板整合**(P2)
