@@ -66,12 +66,14 @@ function ContextStatusBar({
   contextTokens,
   turnTokens,
   sessionTokens,
+  cacheTokens,
   streaming,
 }: {
   model: string;
   contextTokens: number | null;
   turnTokens: number;
   sessionTokens: number;
+  cacheTokens: number;
   streaming: boolean;
 }) {
   const window = contextWindowFor(model);
@@ -98,6 +100,11 @@ function ContextStatusBar({
       <Tooltip title="本会话至今所有 LLM 调用累计的输入+输出 tokens（约等于计费量）">
         <span>本会话累计 {fmtTokens(sessionTokens)} tokens</span>
       </Tooltip>
+      {cacheTokens > 0 && (
+        <Tooltip title="本会话命中 prompt 缓存的输入 tokens，这部分按折扣计费（约为常规输入价的 1/10），命中越多越省">
+          <span className="chat-status-cache">缓存命中 {fmtTokens(cacheTokens)}</span>
+        </Tooltip>
+      )}
     </div>
   );
 }
@@ -155,6 +162,7 @@ export function ChatView() {
     terminalOpen,
     sessionTokens,
     sessionInputTokens,
+    sessionCacheTokens,
     turnInputTokens,
     turnOutputTokens,
     contextTokens,
@@ -281,6 +289,7 @@ export function ChatView() {
           contextTokens={contextTokens}
           turnTokens={turnInputTokens + turnOutputTokens}
           sessionTokens={sessionInputTokens + sessionTokens}
+          cacheTokens={sessionCacheTokens}
           streaming={streaming}
         />
       )}

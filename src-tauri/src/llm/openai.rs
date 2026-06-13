@@ -56,6 +56,18 @@ struct Usage {
     prompt_tokens: Option<u64>,
     #[serde(default)]
     completion_tokens: Option<u64>,
+    // 缓存命中 token：OpenAI/火山方舟 走 prompt_tokens_details.cached_tokens，
+    // DeepSeek 走顶层 prompt_cache_hit_tokens。prompt_tokens 本身已含缓存部分。
+    #[serde(default)]
+    prompt_tokens_details: Option<PromptTokensDetails>,
+    #[serde(default)]
+    prompt_cache_hit_tokens: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PromptTokensDetails {
+    #[serde(default)]
+    cached_tokens: Option<u64>,
 }
 
 /// 按 index 累积流式 tool_calls 片段
@@ -219,6 +231,14 @@ pub async fn stream_chat(
             }
             if usage.prompt_tokens.is_some() {
                 turn.input_tokens = usage.prompt_tokens;
+            }
+            // 缓存命中：优先 prompt_tokens_details.cached_tokens，回退 DeepSeek 的字段
+            let cached = usage
+                .prompt_tokens_details
+                .and_then(|d| d.cached_tokens)
+                .or(usage.prompt_cache_hit_tokens);
+            if cached.is_some() {
+                turn.cache_read_tokens = cached;
             }
         }
         if let Some(choice) = chunk.choices.into_iter().next() {

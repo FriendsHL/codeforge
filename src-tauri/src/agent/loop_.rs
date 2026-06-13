@@ -311,6 +311,7 @@ async fn loop_body(
                         call_input: ci,
                         call_output: co,
                         context_tokens: ci,
+                        cache_read: turn.cache_read_tokens.unwrap_or(0),
                     });
                 }
             }

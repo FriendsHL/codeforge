@@ -116,6 +116,9 @@ pub struct AssistantTurn {
     /// 本次请求的真实上下文大小（API usage 返回）
     pub input_tokens: Option<u64>,
     pub output_tokens: Option<u64>,
+    /// 命中 prompt 缓存、按折扣计费的输入 token（Anthropic cache_read_input_tokens
+    /// / OpenAI prompt_tokens_details.cached_tokens）。None=该 provider 未返回。
+    pub cache_read_tokens: Option<u64>,
 }
 
 /// 流式过程中的增量事件

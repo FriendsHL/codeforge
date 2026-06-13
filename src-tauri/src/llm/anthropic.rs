@@ -39,6 +39,10 @@ struct MessageStart {
 struct InputUsage {
     #[serde(default)]
     input_tokens: Option<u64>,
+    #[serde(default)]
+    cache_read_input_tokens: Option<u64>,
+    #[serde(default)]
+    cache_creation_input_tokens: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -260,7 +264,12 @@ pub async fn stream_chat(
         match data.event_type.as_str() {
             "message_start" => {
                 if let Some(usage) = data.message.and_then(|m| m.usage) {
-                    turn.input_tokens = usage.input_tokens;
+                    let cache_read = usage.cache_read_input_tokens.unwrap_or(0);
+                    let cache_create = usage.cache_creation_input_tokens.unwrap_or(0);
+                    // Anthropic 的 input_tokens 只算未命中缓存的部分，真实上下文还要加上缓存读/写
+                    turn.input_tokens =
+                        Some(usage.input_tokens.unwrap_or(0) + cache_read + cache_create);
+                    turn.cache_read_tokens = usage.cache_read_input_tokens;
                 }
             }
             "content_block_start" => {

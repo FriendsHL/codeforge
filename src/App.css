@@ -514,6 +514,10 @@ body.resizing {
   transition: width 0.3s ease, background 0.3s ease;
 }
 
+.chat-status-cache {
+  color: #52c41a;
+}
+
 .terminal-panel {
   border-top: 1px solid #f0f0f0;
   background: #1e1e1e;

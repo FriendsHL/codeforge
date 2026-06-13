@@ -38,6 +38,7 @@ export type AgentEvent =
       callInput: number;
       callOutput: number;
       contextTokens: number;
+      cacheRead: number;
     }
   | { type: "error"; message: string };
 

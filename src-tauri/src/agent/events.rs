@@ -48,6 +48,8 @@ pub enum AgentEvent {
         call_input: u64,
         call_output: u64,
         context_tokens: u64,
+        /// 本次命中 prompt 缓存的输入 token（按折扣计费）；provider 没返回时为 0
+        cache_read: u64,
     },
     /// 上下文压缩发生时的提示（前端显示为系统注记）
     #[serde(rename_all = "camelCase")]

@@ -162,6 +162,8 @@ interface ChatState {
   sessionTokens: number;
   /** 本会话累计输入 tokens（每次 LLM 调用都计，反映真实花费） */
   sessionInputTokens: number;
+  /** 本会话累计命中 prompt 缓存的输入 tokens（按折扣计费的部分） */
+  sessionCacheTokens: number;
   /** 本轮（最近一次 send 起）累计输入 tokens */
   turnInputTokens: number;
   /** 本轮累计输出 tokens */
@@ -186,6 +188,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   currentSessionId: null,
   sessionTokens: 0,
   sessionInputTokens: 0,
+  sessionCacheTokens: 0,
   turnInputTokens: 0,
   turnOutputTokens: 0,
   contextTokens: null,
@@ -442,6 +445,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             set((s) => ({
               sessionInputTokens: s.sessionInputTokens + event.callInput,
               sessionTokens: s.sessionTokens + event.callOutput,
+              sessionCacheTokens: s.sessionCacheTokens + event.cacheRead,
               turnInputTokens: s.turnInputTokens + event.callInput,
               turnOutputTokens: s.turnOutputTokens + event.callOutput,
               contextTokens: event.contextTokens,
