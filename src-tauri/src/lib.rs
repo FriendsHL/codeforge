@@ -25,6 +25,10 @@ pub struct AppState {
     pub watcher: Mutex<Option<notify::RecommendedWatcher>>,
     /// 停止按钮的取消标志（一次只有一个活动回合）
     pub cancel: Arc<std::sync::atomic::AtomicBool>,
+    /// 是否有回合正在生成（用于判断用户消息该排队还是新开回合）
+    pub generating: Arc<std::sync::atomic::AtomicBool>,
+    /// 生成中用户追加的消息队列，loop 每轮注入进 messages
+    pub pending: Arc<Mutex<Vec<String>>>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -60,12 +64,15 @@ pub fn run() {
             permissions: Arc::new(PermissionManager::default()),
             watcher: Mutex::new(None),
             cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            generating: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            pending: Arc::new(Mutex::new(Vec::new())),
         })
         .invoke_handler(tauri::generate_handler![
             commands::chat::send_message,
             commands::chat::approve_permission,
             commands::chat::stop_generation,
             commands::chat::revert_checkpoint,
+            commands::chat::queue_user_message,
             commands::settings::set_api_key,
             commands::settings::has_api_key,
             commands::settings::set_provider_key,

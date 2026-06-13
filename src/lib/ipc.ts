@@ -100,6 +100,10 @@ export const approvePermission = (requestId: string, approved: boolean, allowAll
 
 export const stopGeneration = () => invoke<void>("stop_generation");
 
+/** 生成中追加消息；返回是否成功排队（false=当前无活动回合，应走正常 send） */
+export const queueUserMessage = (text: string) =>
+  invoke<boolean>("queue_user_message", { text });
+
 export const revertCheckpoint = (sessionId: number, checkpointId: string) =>
   invoke<string>("revert_checkpoint", { sessionId, checkpointId });
 

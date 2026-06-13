@@ -75,11 +75,28 @@ struct ApiError {
 }
 
 fn to_wire_messages(history: &[HistoryItem]) -> Vec<Value> {
-    let mut messages = Vec::new();
+    let mut messages: Vec<Value> = Vec::new();
+
+    // 把一组 content blocks 以 role 追加；与上一条同为 user 时合并（Anthropic 要求严格交替，
+    // 追加对话会产生 tool_result + 用户消息两个连续 user，必须并入同一条）
+    let mut push = |role: &str, mut blocks: Vec<Value>| {
+        if role == "user" {
+            if let Some(last) = messages.last_mut() {
+                if last["role"] == "user" {
+                    if let Some(arr) = last["content"].as_array_mut() {
+                        arr.append(&mut blocks);
+                        return;
+                    }
+                }
+            }
+        }
+        messages.push(json!({"role": role, "content": blocks}));
+    };
+
     for item in history {
         match item {
             HistoryItem::User(text) => {
-                messages.push(json!({"role": "user", "content": text}));
+                push("user", vec![json!({"type": "text", "text": text})]);
             }
             HistoryItem::Assistant { text, tool_calls } => {
                 let mut blocks = Vec::new();
@@ -96,18 +113,18 @@ fn to_wire_messages(history: &[HistoryItem]) -> Vec<Value> {
                         "input": input,
                     }));
                 }
-                messages.push(json!({"role": "assistant", "content": blocks}));
+                push("assistant", blocks);
             }
             HistoryItem::ToolResult { call_id, content, is_error, .. } => {
-                messages.push(json!({
-                    "role": "user",
-                    "content": [{
+                push(
+                    "user",
+                    vec![json!({
                         "type": "tool_result",
                         "tool_use_id": call_id,
                         "content": content,
                         "is_error": is_error,
-                    }],
-                }));
+                    })],
+                );
             }
         }
     }

@@ -53,7 +53,7 @@ function workingLabel(items: ChatItem[]): string {
 }
 
 export function ChatView() {
-  const { items, streaming, error, send, clear, terminalOpen, sessionTokens, contextTokens } =
+  const { items, streaming, error, send, queue, clear, terminalOpen, sessionTokens, contextTokens } =
     useChatStore();
   const workspaceName = useWorkspaceStore((s) => s.name);
   const hasWorkspace = useWorkspaceStore((s) => s.root !== null);
@@ -69,11 +69,18 @@ export function ChatView() {
 
   const submit = () => {
     const text = draft.trim();
-    if (!text || streaming) return;
+    if (!text) return;
     setDraft("");
+    setMentionQuery(null);
+    if (streaming) {
+      // 生成中：排队追加；万一回合刚好结束（排队失败）则转为正常发送
+      void queue(text).then((ok) => {
+        if (!ok) void send(text, []);
+      });
+      return;
+    }
     const used = mentions;
     setMentions([]);
-    setMentionQuery(null);
     void send(text, used);
   };
 
@@ -133,6 +140,7 @@ export function ChatView() {
               ) : (
                 item.content
               )}
+              {item.queued && <span className="bubble-queued">排队中…</span>}
               {item.mentions && item.mentions.length > 0 && (
                 <div className="bubble-mentions">
                   {item.mentions.map((m) => (
@@ -203,21 +211,27 @@ export function ChatView() {
               }
             }}
             placeholder={
-              hasWorkspace
-                ? "输入消息，Enter 发送；@ 引用文件；/help 查看快捷命令"
-                : "输入消息，Enter 发送；/help 查看快捷命令"
+              streaming
+                ? "生成中…可继续输入，Enter 追加到对话"
+                : hasWorkspace
+                  ? "输入消息，Enter 发送；@ 引用文件；/help 查看快捷命令"
+                  : "输入消息，Enter 发送；/help 查看快捷命令"
             }
             autoSize={{ minRows: 1, maxRows: 6 }}
-            disabled={streaming}
           />
         </div>
         <Tooltip title="清空会话">
           <Button icon={<ClearOutlined />} onClick={clear} disabled={streaming} />
         </Tooltip>
         {streaming ? (
-          <Button danger type="primary" icon={<StopOutlined />} onClick={stop}>
-            停止
-          </Button>
+          <>
+            <Tooltip title="追加到当前对话">
+              <Button icon={<SendOutlined />} onClick={submit} />
+            </Tooltip>
+            <Button danger type="primary" icon={<StopOutlined />} onClick={stop}>
+              停止
+            </Button>
+          </>
         ) : (
           <Button type="primary" icon={<SendOutlined />} onClick={submit}>
             发送

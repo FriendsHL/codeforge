@@ -155,6 +155,8 @@ export type ChatItem =
       content: string;
       reasoning?: string;
       mentions?: string[];
+      /** 生成中追加、尚未被 agent 处理的消息 */
+      queued?: boolean;
     }
   | { kind: "notice"; text: string }
   | {
@@ -193,6 +195,8 @@ interface ChatState {
   setModel: (model: string) => void;
   /** mentions: @ 引用的文件相对路径，内容会注入本轮上下文 */
   send: (text: string, mentions?: string[]) => Promise<void>;
+  /** 生成中追加消息：排队注入到后续轮次。返回 false 表示当前没有活动回合 */
+  queue: (text: string) => Promise<boolean>;
   clear: () => void;
 }
 
@@ -490,6 +494,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
         }
       }
     }
+  },
+
+  queue: async (text) => {
+    const t = text.trim();
+    if (!t) return false;
+    const { queueUserMessage } = await import("../lib/ipc");
+    const ok = await queueUserMessage(t);
+    if (ok) {
+      // 乐观插入用户气泡，标记为排队中
+      set((s) => ({
+        items: [...s.items, { kind: "msg", role: "user", content: t, queued: true }],
+      }));
+    }
+    return ok;
   },
 
   clear: () => useSessionStore.getState().startNew(),

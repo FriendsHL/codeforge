@@ -1011,6 +1011,13 @@ body.resizing {
   white-space: nowrap;
 }
 
+.bubble-queued {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  opacity: 0.7;
+}
+
 .bubble-mentions {
   display: flex;
   flex-wrap: wrap;

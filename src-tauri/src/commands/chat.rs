@@ -69,6 +69,8 @@ pub async fn send_message(
     };
 
     state.cancel.store(false, std::sync::atomic::Ordering::SeqCst); // 新回合清掉旧的停止标志
+    state.pending.lock().unwrap().clear(); // 清掉上轮残留的排队消息
+    state.generating.store(true, std::sync::atomic::Ordering::SeqCst);
 
     let app_data = {
         use tauri::Manager;
@@ -92,13 +94,31 @@ pub async fn send_message(
         todos,
         app_data,
         session_id,
+        pending: state.pending.clone(),
     };
     let result = run_agent_loop(&ctx, history, &on_event).await;
+    state.generating.store(false, std::sync::atomic::Ordering::SeqCst);
+    state.pending.lock().unwrap().clear();
 
     if let Err(message) = &result {
         on_event(AgentEvent::Error { message: message.clone() });
     }
     result
+}
+
+/// 生成过程中追加用户消息。返回 true=已排队（会注入到后续轮次）；
+/// false=当前没有进行中的回合，前端应改走正常 send_message
+#[tauri::command]
+pub fn queue_user_message(text: String, state: State<'_, AppState>) -> bool {
+    if !state.generating.load(std::sync::atomic::Ordering::SeqCst) {
+        return false;
+    }
+    let text = text.trim();
+    if text.is_empty() {
+        return false;
+    }
+    state.pending.lock().unwrap().push(text.to_string());
+    true
 }
 
 fn item_chars(item: &HistoryItem) -> usize {

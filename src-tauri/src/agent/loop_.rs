@@ -41,6 +41,12 @@ pub struct AgentCtx {
     /// 检查点存储位置 + 会话 id（无会话则不快照）
     pub app_data: Option<PathBuf>,
     pub session_id: Option<i64>,
+    /// 生成中用户追加的消息队列（loop 每轮注入）
+    pub pending: Arc<std::sync::Mutex<Vec<String>>>,
+}
+
+fn drain_pending(ctx: &AgentCtx) -> Vec<String> {
+    std::mem::take(&mut *ctx.pending.lock().unwrap())
 }
 
 fn is_cancelled(ctx: &AgentCtx) -> bool {
@@ -182,6 +188,12 @@ async fn loop_body(
                 Some(r) => format!("{base_system}\n\n{r}"),
                 None => base_system.clone(),
             };
+            // 用户在生成过程中追加的消息：注入本轮（仅主 agent）
+            if is_main {
+                for q in drain_pending(ctx) {
+                    history.push(HistoryItem::User(q));
+                }
+            }
             // 轮内压缩：把超出预算的旧工具结果替换为占位（保留"读过什么"的索引）
             if iteration > 0 {
                 let pruned = prune_tool_results(&mut history);
@@ -256,6 +268,16 @@ async fn loop_body(
             });
 
             if tool_calls.is_empty() {
+                // agent 本想结束，但若用户已追加消息，则继续回应（追加对话）
+                if is_main {
+                    let more = drain_pending(ctx);
+                    if !more.is_empty() {
+                        for q in more {
+                            history.push(HistoryItem::User(q));
+                        }
+                        continue;
+                    }
+                }
                 on_event(AgentEvent::TurnEnd { stop_reason, input_tokens, output_tokens });
                 return Ok(final_text);
             }
@@ -584,6 +606,7 @@ mod tests {
             todos: Arc::new(std::sync::Mutex::new(Vec::new())),
             app_data: None,
             session_id: None,
+            pending: Arc::new(std::sync::Mutex::new(Vec::new())),
         }
     }
 
