@@ -14,6 +14,10 @@ const MAX_LINE_CHARS: usize = 500;
 pub struct ReadFileTool;
 
 impl Tool for ReadFileTool {
+    fn parallel_safe(&self) -> bool {
+        true
+    }
+
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "read_file".into(),
@@ -72,6 +76,10 @@ impl Tool for ReadFileTool {
 pub struct ListDirTool;
 
 impl Tool for ListDirTool {
+    fn parallel_safe(&self) -> bool {
+        true
+    }
+
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "list_dir".into(),

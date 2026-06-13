@@ -11,7 +11,7 @@ use serde_json::{json, Value};
 use super::events::AgentEvent;
 use super::prompt;
 use crate::llm::registry::Endpoint;
-use crate::llm::types::{AssistantTurn, HistoryItem, LlmDelta, ToolSpec};
+use crate::llm::types::{AssistantTurn, HistoryItem, LlmDelta, ToolCall, ToolSpec};
 use crate::llm::{anthropic, openai};
 use crate::security::PermissionManager;
 use crate::tools::registry::ToolRegistry;
@@ -308,76 +308,112 @@ async fn loop_body(
                 return Ok(final_text);
             }
 
-            for call in tool_calls {
+            // 工具执行：连续的只读(parallel_safe)工具并发跑，其余串行。保持 history 顺序。
+            let is_par = |c: &ToolCall| {
+                c.name != SUBAGENT_TOOL
+                    && ctx.registry.get(&c.name).map(|t| t.parallel_safe()).unwrap_or(false)
+            };
+            let mut idx = 0;
+            while idx < tool_calls.len() {
                 if is_cancelled(ctx) {
                     if is_main {
                         on_event(AgentEvent::TurnEnd { stop_reason: Some("cancelled".into()), input_tokens: None, output_tokens: None });
                     }
                     return Ok(final_text);
                 }
-                let event_id = format!("{id_prefix}{}", call.id);
-                let input: Value = serde_json::from_str(&call.arguments)
-                    .unwrap_or(Value::Object(Default::default()));
-                on_event(AgentEvent::ToolCallStart {
-                    id: event_id.clone(),
-                    name: call.name.clone(),
-                    input: input.clone(),
-                });
-
-                // 写文件类工具：执行前对将被改动的文件拍快照（用户拒绝时为 no-op 快照，无害）
-                let checkpoint_id = maybe_capture_checkpoint(ctx, &event_id, &call.name, &input);
-
-                let started = std::time::Instant::now();
-                let tool_start = crate::trace::now_unix_nanos();
-                let result = if call.name == SUBAGENT_TOOL {
-                    if is_main {
-                        run_subagents(ctx, &input, on_event, &event_id, run_span).await
+                if is_par(&tool_calls[idx]) {
+                    // 收集一段连续的只读工具，并发执行
+                    let start = idx;
+                    while idx < tool_calls.len() && is_par(&tool_calls[idx]) {
+                        idx += 1;
+                    }
+                    let group = &tool_calls[start..idx];
+                    if group.len() == 1 {
+                        history.push(execute_call(ctx, id_prefix, &group[0], on_event, run_span, is_main).await);
                     } else {
-                        Err("子 agent 不允许再派发子 agent".into())
+                        let results = futures_util::future::join_all(
+                            group.iter().map(|c| execute_call(ctx, id_prefix, c, on_event, run_span, is_main)),
+                        )
+                        .await;
+                        history.extend(results);
                     }
                 } else {
-                    execute_tool(ctx, &event_id, &call.name, input.clone(), on_event).await
-                };
-                let (content, is_error) = match result {
-                    Ok(content) => (content, false),
-                    Err(message) => (message, true),
-                };
-                // 仅当真正改动成功才把检查点暴露给前端（拒绝/失败的快照丢弃）
-                let checkpoint_id = if is_error { None } else { checkpoint_id };
-
-                if let Some(tracer) = &ctx.trace {
-                    tracer.span(
-                        &format!("tool {}", call.name),
-                        run_span,
-                        tool_start,
-                        json!({
-                            "gen_ai.tool.name": call.name,
-                            "gen_ai.tool.call.id": event_id,
-                            "codeforge.tool.input": cap_chars(&call.arguments, 2000),
-                            "codeforge.tool.output": cap_chars(&content, 8000),
-                            "codeforge.tool.output_chars": content.chars().count(),
-                        }),
-                        is_error.then_some(content.as_str()).map(|_| "tool error").or(None),
-                    );
+                    history.push(execute_call(ctx, id_prefix, &tool_calls[idx], on_event, run_span, is_main).await);
+                    idx += 1;
                 }
-
-                on_event(AgentEvent::ToolCallEnd {
-                    id: event_id,
-                    output: preview(&content),
-                    is_error,
-                    duration_ms: started.elapsed().as_millis() as u64,
-                    checkpoint_id,
-                });
-                history.push(HistoryItem::ToolResult {
-                    call_id: call.id,
-                    name: call.name,
-                    content,
-                    is_error,
-                });
             }
         }
 
         Err(format!("达到最大迭代次数（{MAX_ITERATIONS}），任务可能过于复杂，请拆小后重试"))
+    }
+}
+
+/// 执行单个工具调用：发 start 事件 → 快照 → 执行(子agent/普通工具) → trace → 发 end 事件，
+/// 返回回填给历史的 ToolResult。被串行与并行两条路径共用。
+async fn execute_call(
+    ctx: &AgentCtx,
+    id_prefix: &str,
+    call: &ToolCall,
+    on_event: &EventSink<'_>,
+    run_span: Option<&str>,
+    is_main: bool,
+) -> HistoryItem {
+    let event_id = format!("{id_prefix}{}", call.id);
+    let input: Value =
+        serde_json::from_str(&call.arguments).unwrap_or(Value::Object(Default::default()));
+    on_event(AgentEvent::ToolCallStart {
+        id: event_id.clone(),
+        name: call.name.clone(),
+        input: input.clone(),
+    });
+
+    let checkpoint_id = maybe_capture_checkpoint(ctx, &event_id, &call.name, &input);
+    let started = std::time::Instant::now();
+    let tool_start = crate::trace::now_unix_nanos();
+
+    let result = if call.name == SUBAGENT_TOOL {
+        if is_main {
+            run_subagents(ctx, &input, on_event, &event_id, run_span).await
+        } else {
+            Err("子 agent 不允许再派发子 agent".into())
+        }
+    } else {
+        execute_tool(ctx, &event_id, &call.name, input.clone(), on_event).await
+    };
+    let (content, is_error) = match result {
+        Ok(content) => (content, false),
+        Err(message) => (message, true),
+    };
+    let checkpoint_id = if is_error { None } else { checkpoint_id };
+
+    if let Some(tracer) = &ctx.trace {
+        tracer.span(
+            &format!("tool {}", call.name),
+            run_span,
+            tool_start,
+            json!({
+                "gen_ai.tool.name": call.name,
+                "gen_ai.tool.call.id": event_id,
+                "codeforge.tool.input": cap_chars(&call.arguments, 2000),
+                "codeforge.tool.output": cap_chars(&content, 8000),
+                "codeforge.tool.output_chars": content.chars().count(),
+            }),
+            is_error.then_some(content.as_str()).map(|_| "tool error"),
+        );
+    }
+
+    on_event(AgentEvent::ToolCallEnd {
+        id: event_id,
+        output: preview(&content),
+        is_error,
+        duration_ms: started.elapsed().as_millis() as u64,
+        checkpoint_id,
+    });
+    HistoryItem::ToolResult {
+        call_id: call.id.clone(),
+        name: call.name.clone(),
+        content,
+        is_error,
     }
 }
 

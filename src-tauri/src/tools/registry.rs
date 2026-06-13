@@ -46,6 +46,11 @@ pub trait Tool: Send + Sync {
     fn is_mutating(&self) -> bool {
         false
     }
+    /// 是否可与同批其他工具并行执行（无副作用、不需审批、不依赖执行顺序）。
+    /// 默认 false（保守串行）；read_file/list_dir/glob/grep/git_* 这类纯只读工具覆盖为 true。
+    fn parallel_safe(&self) -> bool {
+        false
+    }
 }
 
 pub struct ToolRegistry {

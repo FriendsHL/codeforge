@@ -15,6 +15,10 @@ const MAX_MATCH_LINE_CHARS: usize = 300;
 pub struct GlobTool;
 
 impl Tool for GlobTool {
+    fn parallel_safe(&self) -> bool {
+        true
+    }
+
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "glob".into(),
@@ -66,6 +70,10 @@ impl Tool for GlobTool {
 pub struct GrepTool;
 
 impl Tool for GrepTool {
+    fn parallel_safe(&self) -> bool {
+        true
+    }
+
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "grep".into(),

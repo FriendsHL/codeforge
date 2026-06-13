@@ -31,6 +31,10 @@ fn cap(text: String, limit: usize) -> String {
 pub struct GitStatusTool;
 
 impl Tool for GitStatusTool {
+    fn parallel_safe(&self) -> bool {
+        true
+    }
+
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "git_status".into(),
@@ -58,6 +62,10 @@ impl Tool for GitStatusTool {
 pub struct GitDiffTool;
 
 impl Tool for GitDiffTool {
+    fn parallel_safe(&self) -> bool {
+        true
+    }
+
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "git_diff".into(),
@@ -96,6 +104,10 @@ impl Tool for GitDiffTool {
 pub struct GitLogTool;
 
 impl Tool for GitLogTool {
+    fn parallel_safe(&self) -> bool {
+        true
+    }
+
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "git_log".into(),
