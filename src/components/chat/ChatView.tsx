@@ -102,6 +102,48 @@ function ContextStatusBar({
   );
 }
 
+/** 占比 0~100 映射到颜色：占得越满，色相越偏红、明度越深 */
+function ringColor(pct: number): string {
+  const hue = Math.round(140 - (140 * pct) / 100); // 绿(140) → 红(0)
+  const light = Math.round(66 - (30 * pct) / 100); // 浅(66%) → 深(36%)
+  return `hsl(${hue}, 72%, ${light}%)`;
+}
+
+/** 发送区旁的环形上下文占比：弧长=占比，颜色随占比加深，悬停看百分比 */
+function ContextRing({ model, contextTokens }: { model: string; contextTokens: number | null }) {
+  if (contextTokens === null) return null;
+  const window = contextWindowFor(model);
+  const used = contextTokens;
+  const pct = Math.min(100, Math.round((used / window) * 100));
+  const size = 28;
+  const stroke = 4;
+  const r = (size - stroke) / 2;
+  const c = 2 * Math.PI * r;
+  const dash = (pct / 100) * c;
+  const color = ringColor(pct);
+  return (
+    <Tooltip title={`上下文占用 ${pct}%（${used.toLocaleString()} / ${window.toLocaleString()} tokens）`}>
+      <svg width={size} height={size} className="ctx-ring" role="img" aria-label={`上下文占用 ${pct}%`}>
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" className="ctx-ring-track" strokeWidth={stroke} />
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={r}
+          fill="none"
+          stroke={color}
+          strokeWidth={stroke}
+          strokeDasharray={`${dash} ${c - dash}`}
+          strokeLinecap="round"
+          transform={`rotate(-90 ${size / 2} ${size / 2})`}
+        />
+        <text x="50%" y="50%" className="ctx-ring-text" dominantBaseline="central" textAnchor="middle">
+          {pct}
+        </text>
+      </svg>
+    </Tooltip>
+  );
+}
+
 export function ChatView() {
   const {
     items,
@@ -307,6 +349,7 @@ export function ChatView() {
             autoSize={{ minRows: 1, maxRows: 6 }}
           />
         </div>
+        <ContextRing model={model} contextTokens={contextTokens} />
         <Tooltip title="清空会话">
           <Button icon={<ClearOutlined />} onClick={clear} disabled={streaming} />
         </Tooltip>
