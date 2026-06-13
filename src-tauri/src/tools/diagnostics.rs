@@ -11,7 +11,7 @@ use super::registry::Tool;
 use crate::llm::types::ToolSpec;
 use crate::pty;
 
-const TIMEOUT: Duration = Duration::from_secs(180);
+const TIMEOUT: Duration = Duration::from_secs(300); // Maven/Gradle 首次编译较慢，给足
 const MAX_OUTPUT_CHARS: usize = 20_000;
 
 struct Checker {
@@ -26,6 +26,9 @@ const CHECKERS: &[Checker] = &[
     Checker { name: "typescript", marker: "tsconfig.json", command: "npx --no-install tsc --noEmit 2>&1 || true" },
     Checker { name: "python-ruff", marker: "pyproject.toml", command: "ruff check . 2>&1 || true" },
     Checker { name: "go", marker: "go.mod", command: "go vet ./... 2>&1 || true" },
+    // Java：编译检查（test-compile 连测试代码一起编，覆盖更全）。-q 安静、-o 离线优先省时
+    Checker { name: "java-maven", marker: "pom.xml", command: "mvn -q -o test-compile 2>&1 || mvn -q test-compile 2>&1 || true" },
+    Checker { name: "java-gradle", marker: "build.gradle", command: "./gradlew -q compileTestJava 2>&1 || gradle -q compileTestJava 2>&1 || true" },
 ];
 
 fn pick_checker<'a>(workspace: &Path, explicit: Option<&str>) -> Option<&'a Checker> {
@@ -41,11 +44,11 @@ impl Tool for DiagnosticsTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "diagnostics".into(),
-            description: "对当前项目跑一次快速类型/语法检查（rust=cargo check、ts=tsc --noEmit、python=ruff、go=go vet，按项目自动选），返回结构化报错。改完代码后用它确认没引入编译错误，比手动跑构建快。".into(),
+            description: "对当前项目跑一次快速类型/语法检查（rust=cargo check、ts=tsc --noEmit、python=ruff、go=go vet、java=mvn/gradle 编译，按项目自动选），返回结构化报错。改完代码后用它确认没引入编译错误，比手动跑构建快。".into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
-                    "checker": {"type": "string", "enum": ["rust", "typescript", "python-ruff", "go"], "description": "强制指定检查器（默认按项目自动选）"}
+                    "checker": {"type": "string", "enum": ["rust", "typescript", "python-ruff", "go", "java-maven", "java-gradle"], "description": "强制指定检查器（默认按项目自动选）"}
                 },
                 "required": []
             }),
@@ -100,6 +103,13 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let c = pick_checker(dir.path(), Some("go")).unwrap();
         assert_eq!(c.name, "go");
+    }
+
+    #[test]
+    fn picks_java_maven_by_pom() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("pom.xml"), "<project/>").unwrap();
+        assert_eq!(pick_checker(dir.path(), None).unwrap().name, "java-maven");
     }
 
     #[test]
