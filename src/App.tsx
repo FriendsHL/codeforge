@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { App as AntdApp, Button, ConfigProvider, Tag, Tooltip } from "antd";
+import { App as AntdApp, Button, ConfigProvider, Tag, Tooltip, theme as antdTheme } from "antd";
 import {
   BranchesOutlined,
+  BulbOutlined,
   FolderOpenOutlined,
   GlobalOutlined,
+  MoonOutlined,
   SettingOutlined,
 } from "@ant-design/icons";
 import { ChatView } from "./components/chat/ChatView";
@@ -17,6 +19,7 @@ import { hasApiKey } from "./lib/ipc";
 import { useChatStore } from "./stores/chatStore";
 import { useGitStore } from "./stores/gitStore";
 import { useSessionStore } from "./stores/sessionStore";
+import { useThemeStore } from "./stores/themeStore";
 import { useTodoStore } from "./stores/todoStore";
 import { LIMITS, useUiStore } from "./stores/uiStore";
 import { useViewerStore } from "./stores/viewerStore";
@@ -29,6 +32,7 @@ function App() {
   const branch = useGitStore((s) => s.branch);
   const viewerOpen = useViewerStore((s) => s.content !== null);
   const { widths, resize } = useUiStore();
+  const { mode, toggle } = useThemeStore();
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   // 启动时加载历史会话列表
@@ -75,7 +79,12 @@ function App() {
   }, []);
 
   return (
-    <ConfigProvider theme={{ token: { colorPrimary: "#d46b08" } }}>
+    <ConfigProvider
+      theme={{
+        token: { colorPrimary: "#d46b08" },
+        algorithm: mode === "dark" ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
+      }}
+    >
       <AntdApp>
         <div className="app-layout">
           <header className="app-header">
@@ -88,6 +97,13 @@ function App() {
               </Tag>
             )}
             <div className="app-header-spacer" />
+            <Tooltip title={mode === "dark" ? "切到浅色" : "切到深色"}>
+              <Button
+                type="text"
+                icon={mode === "dark" ? <BulbOutlined /> : <MoonOutlined />}
+                onClick={toggle}
+              />
+            </Tooltip>
             <Tooltip title="浏览器面板（预览本地 dev server）">
               <Button
                 type="text"

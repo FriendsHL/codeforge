@@ -15,6 +15,120 @@ body {
   background: #fafafa;
 }
 
+/* ===== 深色模式：追加覆盖，不动浅色规则 ===== */
+[data-theme="dark"] {
+  --cf-surface: #1f1f1f;
+  --cf-subtle: #262626;
+  --cf-border: #303030;
+  --cf-text: #e6e6e6;
+  --cf-text-dim: #9a9a9a;
+}
+
+[data-theme="dark"] body {
+  background: #141414;
+  color: var(--cf-text);
+}
+
+[data-theme="dark"] .app-header,
+[data-theme="dark"] .projects-panel,
+[data-theme="dark"] .right-panel,
+[data-theme="dark"] .viewer-panel,
+[data-theme="dark"] .chat-input,
+[data-theme="dark"] .mention-chips,
+[data-theme="dark"] .chat-status,
+[data-theme="dark"] .projects-panel {
+  background: var(--cf-surface);
+  border-color: var(--cf-border);
+}
+
+[data-theme="dark"] .app-header,
+[data-theme="dark"] .chat-input,
+[data-theme="dark"] .viewer-header,
+[data-theme="dark"] .projects-actions,
+[data-theme="dark"] .explorer-switch {
+  border-color: var(--cf-border) !important;
+}
+
+[data-theme="dark"] .chat-bubble-assistant,
+[data-theme="dark"] .tool-card,
+[data-theme="dark"] .thinking-card,
+[data-theme="dark"] .subagent-group,
+[data-theme="dark"] .mention-picker,
+[data-theme="dark"] .viewer-header {
+  background: var(--cf-subtle);
+  border-color: var(--cf-border);
+  color: var(--cf-text);
+}
+
+[data-theme="dark"] .chat-bubble-assistant pre,
+[data-theme="dark"] .chat-bubble-assistant code,
+[data-theme="dark"] .file-preview,
+[data-theme="dark"] .viewer-code,
+[data-theme="dark"] .md-rendered pre,
+[data-theme="dark"] .diff-view,
+[data-theme="dark"] .diff-gutter {
+  background: #1a1a1a;
+  color: var(--cf-text);
+}
+
+[data-theme="dark"] .diff-row-add {
+  background: #16301c;
+}
+[data-theme="dark"] .diff-row-del {
+  background: #3a1a1a;
+}
+[data-theme="dark"] .diff-hunk-row {
+  background: #1a2333;
+}
+
+[data-theme="dark"] .session-item:hover,
+[data-theme="dark"] .project-header:hover,
+[data-theme="dark"] .changes-item:hover {
+  background: var(--cf-subtle);
+}
+[data-theme="dark"] .session-item-active,
+[data-theme="dark"] .project-header-active {
+  background: #3a2a14;
+}
+
+[data-theme="dark"] .chat-notice,
+[data-theme="dark"] .tool-card-output,
+[data-theme="dark"] .md-rendered table th,
+[data-theme="dark"] .md-rendered table td {
+  background: var(--cf-subtle);
+  border-color: var(--cf-border);
+}
+
+[data-theme="dark"] .resize-handle::after {
+  background: var(--cf-border);
+}
+
+/* viewer / 文件树 / 终端 等内容区补深底 */
+[data-theme="dark"] .viewer-body,
+[data-theme="dark"] .md-rendered,
+[data-theme="dark"] .explorer,
+[data-theme="dark"] .explorer-tree,
+[data-theme="dark"] .changes-panel,
+[data-theme="dark"] .session-list,
+[data-theme="dark"] .projects-scroll {
+  background: var(--cf-surface);
+  color: var(--cf-text);
+}
+
+[data-theme="dark"] .viewer-header,
+[data-theme="dark"] .terminal-header {
+  background: var(--cf-subtle);
+}
+
+/* 浅灰文字在深底下提亮一档 */
+[data-theme="dark"] .session-time,
+[data-theme="dark"] .mention-dir,
+[data-theme="dark"] .tool-card-duration,
+[data-theme="dark"] .chat-notice,
+[data-theme="dark"] .chat-status {
+  color: var(--cf-text-dim);
+}
+
 .app-layout {
   display: flex;
   flex-direction: column;
