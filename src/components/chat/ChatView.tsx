@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { Alert, App, Button, Empty, Input, Segmented, Tag, Tooltip } from "antd";
+import { Alert, App, Button, Empty, Input, Segmented, Select, Tag, Tooltip } from "antd";
 import { ClearOutlined, SendOutlined, StopOutlined } from "@ant-design/icons";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { stopGeneration } from "../../lib/ipc";
+import { listAgentRoles, stopGeneration, type AgentRoleMeta } from "../../lib/ipc";
 import { contextWindowFor } from "../../lib/models";
 import { useChatStore } from "../../stores/chatStore";
 import { fmtTokens, ringColor, toBlocks, workingLabel } from "./chatHelpers";
@@ -14,6 +14,16 @@ import { SubagentGroup } from "./SubagentGroup";
 import { ThinkingCard } from "./ThinkingCard";
 import { TodoPanel } from "./TodoPanel";
 import { ToolCallCard } from "./ToolCallCard";
+
+/** 内置角色名 → 中文显示标签；自定义角色回退到原名 */
+const ROLE_LABELS: Record<string, string> = {
+  default: "通用",
+  research: "调研",
+  product: "产品方案",
+  dev: "开发",
+  review: "Review",
+};
+const roleLabel = (name: string) => ROLE_LABELS[name] ?? name;
 
 /** 底部上下文/花费状态条：上下文占用进度 + 本轮花费 + 本会话累计花费 */
 function ContextStatusBar({
@@ -116,6 +126,8 @@ export function ChatView() {
     model,
     mode,
     setMode,
+    role,
+    setRole,
   } = useChatStore();
   const workspaceName = useWorkspaceStore((s) => s.name);
   const hasWorkspace = useWorkspaceStore((s) => s.root !== null);
@@ -123,11 +135,17 @@ export function ChatView() {
   const [draft, setDraft] = useState("");
   const [mentions, setMentions] = useState<string[]>([]); // @ 引用的文件
   const [mentionQuery, setMentionQuery] = useState<string | null>(null); // null=未触发
+  const [roles, setRoles] = useState<AgentRoleMeta[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [items]);
+
+  // 加载可用 agent 角色（含工作区自定义）
+  useEffect(() => {
+    void listAgentRoles().then(setRoles).catch(() => setRoles([]));
+  }, [hasWorkspace]);
 
   const submit = () => {
     const text = draft.trim();
@@ -266,10 +284,34 @@ export function ChatView() {
             { label: "计划", value: "plan" },
           ]}
         />
+        <Tooltip
+          title={
+            role === "default"
+              ? "选一个 agent 角色：用专属人设+工具集驱动整轮对话"
+              : roles.find((r) => r.name === role)?.description
+          }
+        >
+          <Select
+            size="small"
+            value={role}
+            onChange={setRole}
+            disabled={streaming}
+            popupMatchSelectWidth={false}
+            style={{ minWidth: 92 }}
+            options={[
+              { label: "通用", value: "default" },
+              ...roles.map((r) => ({ label: `角色·${roleLabel(r.name)}`, value: r.name })),
+            ]}
+          />
+        </Tooltip>
         <span className="chat-mode-hint">
-          {mode === "ask" && "写文件/命令需逐个确认"}
-          {mode === "auto" && "自动执行，仅危险操作需确认"}
-          {mode === "plan" && "只读+调研，产出方案不动手"}
+          {role !== "default"
+            ? `${roleLabel(role)} 角色 · 工具与职责已按角色限定`
+            : mode === "ask"
+              ? "写文件/命令需逐个确认"
+              : mode === "auto"
+                ? "自动执行，仅危险操作需确认"
+                : "只读+调研，产出方案不动手"}
         </span>
       </div>
 

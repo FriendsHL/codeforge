@@ -66,6 +66,32 @@ pub struct AgentCtx {
     pub session_id: Option<i64>,
     /// 生成中用户追加的消息队列（loop 每轮注入）
     pub pending: Arc<std::sync::Mutex<Vec<String>>>,
+    /// 当前 agent 角色（会话驱动选中的，或子 agent 被指派的）；None=通用 agent
+    pub role: Option<Arc<crate::agents::AgentRole>>,
+}
+
+impl AgentCtx {
+    /// 复制一份上下文、换一个角色，用于派发带角色的子 agent。
+    /// 共享的状态（registry/permissions/cancel/trace/pending 等）按 Arc 浅拷贝。
+    fn child_with_role(&self, role: Option<Arc<crate::agents::AgentRole>>) -> AgentCtx {
+        AgentCtx {
+            endpoint: self.endpoint,
+            api_key: self.api_key.clone(),
+            model: self.model.clone(),
+            registry: self.registry.clone(),
+            workspace: self.workspace.clone(),
+            permissions: self.permissions.clone(),
+            mode: self.mode,
+            cancel: self.cancel.clone(),
+            provider: self.provider.clone(),
+            trace: self.trace.clone(),
+            todos: self.todos.clone(),
+            app_data: self.app_data.clone(),
+            session_id: self.session_id,
+            pending: self.pending.clone(),
+            role,
+        }
+    }
 }
 
 fn drain_pending(ctx: &AgentCtx) -> Vec<String> {
@@ -127,10 +153,22 @@ fn cap_chars(text: &str, limit: usize) -> String {
     }
 }
 
-fn subagent_spec() -> ToolSpec {
+fn subagent_spec(workspace: Option<&std::path::Path>) -> ToolSpec {
+    // 把可用角色列进描述，主 agent 才知道能给子任务指派角色
+    let roles = crate::agents::discover(workspace);
+    let role_list = roles
+        .iter()
+        .map(|r| format!("{}（{}）", r.name, r.description))
+        .collect::<Vec<_>>()
+        .join("；");
+    let desc = format!(
+        "把 1~4 个互相独立的子任务并行派给子 agent。每个子 agent 有独立上下文，最终只把书面汇报返回给你。\
+适合并行探索/批量调查/分工（如让 review 角色审、research 角色查）；不适合有先后依赖的步骤。\
+可给每个子任务指定 role 让它以特定角色+工具集执行。可用角色：{role_list}。"
+    );
     ToolSpec {
         name: SUBAGENT_TOOL.into(),
-        description: "把 1~4 个互相独立的子任务并行派给子 agent。每个子 agent 有独立上下文、可用全部工具，最终只把书面汇报返回给你。适合并行探索/批量调查/隔离大输出；不适合有先后依赖的步骤。".into(),
+        description: desc,
         input_schema: json!({
             "type": "object",
             "properties": {
@@ -141,7 +179,8 @@ fn subagent_spec() -> ToolSpec {
                         "type": "object",
                         "properties": {
                             "title": {"type": "string", "description": "子任务短标题"},
-                            "prompt": {"type": "string", "description": "给子 agent 的完整任务说明（它没有你的上下文，写清楚背景和期望产出）"}
+                            "prompt": {"type": "string", "description": "给子 agent 的完整任务说明（它没有你的上下文，写清楚背景和期望产出）"},
+                            "role": {"type": "string", "description": "可选：让子 agent 以某个角色执行（research/product/dev/review 等），不填则用通用 agent"}
                         },
                         "required": ["title", "prompt"]
                     }
@@ -203,12 +242,23 @@ async fn loop_body(
             HistoryItem::User(t) => Some(t.clone()),
             _ => None,
         });
-        let base_system =
-            prompt::build_system_prompt(ctx.workspace.as_deref(), !is_main, ctx.mode, query.as_deref());
+        let role_prompt = ctx.role.as_ref().map(|r| r.system_prompt.as_str());
+        let base_system = prompt::build_system_prompt(
+            ctx.workspace.as_deref(),
+            !is_main,
+            ctx.mode,
+            query.as_deref(),
+            role_prompt,
+        );
         let mut tools = ctx.registry.specs(ctx.workspace.is_some(), plan_only);
-        // plan 模式不派子 agent（子 agent 会绕过工具过滤去执行写操作）
-        if is_main && !plan_only {
-            tools.push(subagent_spec());
+        // 角色工具白名单：只保留该角色允许的工具（空白名单=不限）
+        if let Some(role) = &ctx.role {
+            tools.retain(|t| role.allows(&t.name));
+        }
+        // plan 模式不派子 agent；角色不允许 spawn_subagents 时也不给
+        let role_allows_subagents = ctx.role.as_ref().map(|r| r.allows(SUBAGENT_TOOL)).unwrap_or(true);
+        if is_main && !plan_only && role_allows_subagents {
+            tools.push(subagent_spec(ctx.workspace.as_deref()));
         }
 
         let mut final_text = String::new();
@@ -396,6 +446,29 @@ async fn execute_call(
         input: input.clone(),
     });
 
+    // 角色工具白名单的执行期兜底：模型若调了本角色不该用的工具，直接拒绝
+    if let Some(role) = &ctx.role {
+        if !role.allows(&call.name) {
+            let rejection = format!(
+                "工具 {} 被拒绝：当前是「{}」角色，不允许使用该工具。请在职责范围内完成任务。",
+                call.name, role.name
+            );
+            on_event(AgentEvent::ToolCallEnd {
+                id: event_id,
+                output: preview(&rejection),
+                is_error: true,
+                duration_ms: 0,
+                checkpoint_id: None,
+            });
+            return HistoryItem::ToolResult {
+                call_id: call.id.clone(),
+                name: call.name.clone(),
+                content: rejection,
+                is_error: true,
+            };
+        }
+    }
+
     // read-before-edit 闸门：没读过就不准凭记忆改文件，避免幻觉式 edit 把文件改坏
     if let Some(rejection) = {
         let set = read_files.lock().unwrap();
@@ -485,15 +558,29 @@ async fn run_subagents<'a>(
     if tasks.is_empty() || tasks.len() > MAX_SUBAGENTS {
         return Err(format!("tasks 数量需在 1~{MAX_SUBAGENTS} 之间"));
     }
-    let parsed: Vec<(String, String)> = tasks
+    // 每个子任务可带 role 指定角色（research/product/dev/review 或自定义）
+    let parsed: Vec<(String, String, Option<String>)> = tasks
         .iter()
         .map(|t| {
             Ok((
                 t["title"].as_str().ok_or("子任务缺少 title")?.to_string(),
                 t["prompt"].as_str().ok_or("子任务缺少 prompt")?.to_string(),
+                t["role"].as_str().filter(|r| !r.is_empty()).map(str::to_string),
             ))
         })
         .collect::<Result<_, String>>()?;
+
+    // 为每个子任务按其 role 准备一份子上下文（角色无效则退回通用 agent）
+    let child_ctxs: Vec<AgentCtx> = parsed
+        .iter()
+        .map(|(_, _, role_name)| {
+            let role = role_name
+                .as_deref()
+                .and_then(|n| crate::agents::resolve(ctx.workspace.as_deref(), n))
+                .map(std::sync::Arc::new);
+            ctx.child_with_role(role)
+        })
+        .collect();
 
     // 子 agent 的文本增量不直接进会话流（只有最终汇报作为工具结果返回），
     // 但工具调用/审批事件照常转发，用户能看到子 agent 在干什么
@@ -504,20 +591,22 @@ async fn run_subagents<'a>(
         other => on_event(other),
     };
 
-    let futures = parsed.iter().enumerate().map(|(index, (_, prompt_text))| {
-        loop_impl(
-            ctx,
-            vec![HistoryItem::User(prompt_text.clone())],
-            &quiet,
-            format!("{parent_id}-s{index}-"),
-            false,
-            trace_parent.map(str::to_string),
-        )
-    });
+    let futures = child_ctxs.iter().zip(parsed.iter()).enumerate().map(
+        |(index, (cctx, (_, prompt_text, _)))| {
+            loop_impl(
+                cctx,
+                vec![HistoryItem::User(prompt_text.clone())],
+                &quiet,
+                format!("{parent_id}-s{index}-"),
+                false,
+                trace_parent.map(str::to_string),
+            )
+        },
+    );
     let results = futures_util::future::join_all(futures).await;
 
     let mut report = String::new();
-    for ((title, _), result) in parsed.iter().zip(results) {
+    for ((title, _, _), result) in parsed.iter().zip(results) {
         let body = match result {
             Ok(text) if !text.trim().is_empty() => text,
             Ok(_) => "(子 agent 未给出汇报)".into(),
@@ -809,6 +898,7 @@ mod tests {
             app_data: None,
             session_id: None,
             pending: Arc::new(std::sync::Mutex::new(Vec::new())),
+            role: None,
         }
     }
 

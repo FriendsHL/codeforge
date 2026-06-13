@@ -158,6 +158,9 @@ interface ChatState {
   model: string;
   mode: import("../lib/ipc").AgentMode;
   setMode: (mode: import("../lib/ipc").AgentMode) => void;
+  /** 当前 agent 角色名（"default"=通用，或 research/product/dev/review 等） */
+  role: string;
+  setRole: (role: string) => void;
   currentSessionId: number | null;
   /** 本会话累计输出 tokens（仅 UI 提示用） */
   sessionTokens: number;
@@ -185,6 +188,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   error: null,
   model: localStorage.getItem(MODEL_STORAGE_KEY) ?? DEFAULT_MODEL,
   mode: (localStorage.getItem("codeforge.mode") as import("../lib/ipc").AgentMode) || "ask",
+  role: localStorage.getItem("codeforge.role") || "default",
   currentSessionId: null,
   sessionTokens: 0,
   sessionInputTokens: 0,
@@ -201,6 +205,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setMode: (mode) => {
     localStorage.setItem("codeforge.mode", mode);
     set({ mode });
+  },
+
+  setRole: (role) => {
+    localStorage.setItem("codeforge.role", role);
+    set({ role });
   },
 
   send: async (text, mentions = []) => {
@@ -377,7 +386,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     try {
       const { provider, model: modelId } = splitModelValue(model);
-      await sendMessage(provider, modelId, history, get().currentSessionId, get().mode, (event) => {
+      await sendMessage(provider, modelId, history, get().currentSessionId, get().mode, get().role, (event) => {
         switch (event.type) {
           case "textDelta":
             appendToAssistant({ content: event.text });

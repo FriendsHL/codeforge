@@ -66,12 +66,20 @@ export async function sendMessage(
   messages: ChatMessage[],
   sessionId: number | null,
   mode: AgentMode,
+  role: string | null,
   onEvent: (event: AgentEvent) => void,
 ): Promise<void> {
   const channel = new Channel<AgentEvent>();
   channel.onmessage = onEvent;
-  await invoke("send_message", { provider, model, messages, sessionId, mode, channel });
+  await invoke("send_message", { provider, model, messages, sessionId, mode, role, channel });
 }
+
+export interface AgentRoleMeta {
+  name: string;
+  description: string;
+}
+
+export const listAgentRoles = () => invoke<AgentRoleMeta[]>("list_agent_roles");
 
 export const setApiKey = (key: string) => invoke<void>("set_api_key", { key });
 

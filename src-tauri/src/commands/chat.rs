@@ -19,6 +19,7 @@ pub async fn send_message(
     messages: Vec<ChatMessage>,
     session_id: Option<i64>,
     mode: Option<String>,
+    role: Option<String>,
     channel: Channel<AgentEvent>,
     app: tauri::AppHandle,
     state: State<'_, AppState>,
@@ -28,6 +29,11 @@ pub async fn send_message(
     let endpoint = registry::resolve(&provider)?;
     let api_key = registry::api_key_for(&endpoint)?;
     let workspace = state.workspace.lock().unwrap().clone();
+    // 会话驱动的角色：选了就用它的人设 + 工具白名单（无则常规通用 agent）
+    let role = role
+        .filter(|r| !r.is_empty() && r != "default")
+        .and_then(|r| crate::agents::resolve(workspace.as_deref(), &r))
+        .map(Arc::new);
     let permissions = state.permissions.clone();
 
     // 本回合的任务清单（todo_write 维护，loop 注入为 system-reminder）
@@ -100,6 +106,7 @@ pub async fn send_message(
         app_data,
         session_id,
         pending: state.pending.clone(),
+        role,
     };
     let result = run_agent_loop(&ctx, history, &on_event).await;
     state.generating.store(false, std::sync::atomic::Ordering::SeqCst);
@@ -109,6 +116,22 @@ pub async fn send_message(
         on_event(AgentEvent::Error { message: message.clone() });
     }
     result
+}
+
+#[derive(serde::Serialize)]
+pub struct AgentRoleMeta {
+    pub name: String,
+    pub description: String,
+}
+
+/// 列出可用的 agent 角色（内置 + 用户自定义），供前端角色选择器使用
+#[tauri::command]
+pub fn list_agent_roles(state: State<'_, AppState>) -> Vec<AgentRoleMeta> {
+    let workspace = state.workspace.lock().unwrap().clone();
+    crate::agents::discover(workspace.as_deref())
+        .into_iter()
+        .map(|r| AgentRoleMeta { name: r.name, description: r.description })
+        .collect()
 }
 
 /// 生成过程中追加用户消息。返回 true=已排队（会注入到后续轮次）；

@@ -1,4 +1,5 @@
 mod agent;
+mod agents;
 mod checkpoint;
 mod commands;
 mod config;
@@ -74,6 +75,7 @@ pub fn run() {
             commands::chat::stop_generation,
             commands::chat::revert_checkpoint,
             commands::chat::queue_user_message,
+            commands::chat::list_agent_roles,
             commands::settings::set_api_key,
             commands::settings::has_api_key,
             commands::settings::set_provider_key,

@@ -8,9 +8,17 @@ pub fn build_system_prompt(
     mode: crate::agent::loop_::AgentMode,
     // 本轮用户问题：用于记忆的相关性检索（记忆超预算时择优注入）
     query: Option<&str>,
+    // 当前 agent 角色的专属人设（会话驱动或子 agent 指派）；拼在最前面
+    role_prompt: Option<&str>,
 ) -> String {
     use crate::agent::loop_::AgentMode;
     let mut sections: Vec<String> = Vec::new();
+
+    if let Some(rp) = role_prompt {
+        if !rp.trim().is_empty() {
+            sections.push(rp.trim().to_string());
+        }
+    }
 
     match mode {
         AgentMode::Plan => sections.push(
