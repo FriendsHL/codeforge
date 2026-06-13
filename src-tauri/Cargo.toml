@@ -1,6 +1,6 @@
 [package]
 name = "codeforge"
-version = "1.1.0"
+version = "1.2.0"
 description = "CodeForge — a coding agent desktop app for macOS"
 authors = ["FriendsHL"]
 edition = "2021"

@@ -4,7 +4,7 @@ A coding agent desktop app for macOS — sibling project of skillForge.
 
 打开一个本地项目，和 agent 对话：它会自己读代码、改代码（经你审批）、跑测试自我纠错，全程可见可控。
 
-## 功能（v1.1）
+## 功能（v1.2）
 
 - **Agent loop**：自研 tool-use 循环，支持多轮工具链式调用（上限 30 轮）
 - **内置工具**：read_file / list_dir / glob / grep / git_status / git_diff / git_log / write_file / edit_file / bash / web_fetch / web_search / todo_write，外加运行时注入的 browser_open / spawn_subagents 与 MCP 工具
