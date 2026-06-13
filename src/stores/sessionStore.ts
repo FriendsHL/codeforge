@@ -12,6 +12,7 @@ import {
   SessionStats,
 } from "../lib/ipc";
 import { useChatStore } from "./chatStore";
+import { useViewerStore } from "./viewerStore";
 import { useWorkspaceStore } from "./workspaceStore";
 
 interface SessionState {
@@ -61,8 +62,8 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       turnInputTokens: 0,
       turnOutputTokens: 0,
       contextTokens: stats.contextTokens ?? null,
-      terminalOpen: false,
     });
+    useViewerStore.getState().closeAll();
   },
 
   startNew: () => {
@@ -76,8 +77,8 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       turnInputTokens: 0,
       turnOutputTokens: 0,
       contextTokens: null,
-      terminalOpen: false,
     });
+    useViewerStore.getState().closeAll();
   },
 
   rename: async (id, title) => {

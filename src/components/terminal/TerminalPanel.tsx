@@ -1,11 +1,8 @@
 import { useEffect, useRef } from "react";
-import { Button } from "antd";
-import { CloseOutlined } from "@ant-design/icons";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import { termSubscribe } from "../../lib/terminal";
-import { useChatStore } from "../../stores/chatStore";
 
 export function TerminalPanel() {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -41,15 +38,7 @@ export function TerminalPanel() {
 
   return (
     <div className="terminal-panel">
-      <div className="terminal-header">
-        <span>终端（agent 命令回显，只读）</span>
-        <Button
-          type="text"
-          size="small"
-          icon={<CloseOutlined />}
-          onClick={() => useChatStore.setState({ terminalOpen: false })}
-        />
-      </div>
+      <div className="terminal-hint">终端 · agent 命令回显（只读）</div>
       <div className="terminal-body" ref={containerRef} />
     </div>
   );

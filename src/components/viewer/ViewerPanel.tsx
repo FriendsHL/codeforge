@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Alert, Button, Input, Segmented, Tag, Typography } from "antd";
+import { Alert, Button, Input, Segmented, Typography } from "antd";
+import type { ReactElement } from "react";
 import {
   CloseOutlined,
   DiffOutlined,
@@ -12,9 +13,11 @@ import {
   ReloadOutlined,
   RightOutlined,
 } from "@ant-design/icons";
+import { CodeOutlined } from "@ant-design/icons";
 import { highlightCode, languageForPath } from "../../lib/highlight";
-import { useViewerStore } from "../../stores/viewerStore";
+import { useViewerStore, type ViewerTab } from "../../stores/viewerStore";
 import { DiffView } from "../explorer/DiffView";
+import { TerminalPanel } from "../terminal/TerminalPanel";
 
 function normalizeUrl(input: string): string {
   const trimmed = input.trim();
@@ -164,49 +167,87 @@ function FileBody({ path, content }: { path: string; content: string }) {
   );
 }
 
-/** 文件 / diff / 浏览器查看器：位于主交互区与右栏之间 */
-export function ViewerPanel() {
-  const { content, close } = useViewerStore();
-  if (!content) return null;
-
-  const icon =
-    content.type === "diff" ? (
-      <DiffOutlined />
-    ) : content.type === "browser" ? (
-      <GlobalOutlined />
-    ) : (
-      <FileTextOutlined />
-    );
-  const title = content.type === "browser" ? "浏览器" : content.path;
-
+/** 文件/diff 内容体 */
+function ContentBody({ content }: { content: NonNullable<ReturnType<typeof useViewerStore.getState>["content"]> }) {
   return (
-    <div className="viewer-panel">
-      <div className="viewer-header">
-        {icon}
-        <span className="viewer-path" title={title}>
-          {title}
-        </span>
-        {content.type === "diff" && <Tag color="orange">diff</Tag>}
-        <Button type="text" size="small" icon={<CloseOutlined />} onClick={close} />
-      </div>
-      {content.type === "browser" ? (
-        <BrowserView url={content.url} />
-      ) : (
-        <div className="viewer-body">
-          {content.type === "file" ? (
-            <>
-              {content.truncated && (
-                <Typography.Text type="warning" style={{ fontSize: 12 }}>
-                  文件过大，仅显示前 200KB
-                </Typography.Text>
-              )}
-              <FileBody path={content.path} content={content.content} />
-            </>
-          ) : (
-            <DiffView path={content.path} diff={content.diff} />
+    <div className="viewer-body">
+      {content.type === "file" ? (
+        <>
+          {content.truncated && (
+            <Typography.Text type="warning" style={{ fontSize: 12 }}>
+              文件过大，仅显示前 200KB
+            </Typography.Text>
           )}
-        </div>
+          <FileBody path={content.path} content={content.content} />
+        </>
+      ) : (
+        <DiffView path={content.path} diff={content.diff} />
       )}
     </div>
   );
+}
+
+/** 多 tab 查看器：文件/diff、浏览器、终端同栏切换。位于主交互区与右栏之间 */
+export function ViewerPanel() {
+  const { content, browserUrl, terminalOpen, activeTab, setTab, closeTab } = useViewerStore();
+
+  // 组装当前存在的 tab
+  const tabs: { key: ViewerTab; icon: ReactElement; label: string }[] = [];
+  if (content) {
+    tabs.push({
+      key: "content",
+      icon: content.type === "diff" ? <DiffOutlined /> : <FileTextOutlined />,
+      label: content.type === "diff" ? `diff: ${baseName(content.path)}` : baseName(content.path),
+    });
+  }
+  if (browserUrl !== null) tabs.push({ key: "browser", icon: <GlobalOutlined />, label: "浏览器" });
+  if (terminalOpen) tabs.push({ key: "terminal", icon: <CodeOutlined />, label: "终端" });
+
+  if (tabs.length === 0) return null;
+
+  // activeTab 可能指向已关闭的 tab，兜底到第一个存在的
+  const active = tabs.some((t) => t.key === activeTab) ? activeTab : tabs[0].key;
+
+  return (
+    <div className="viewer-panel">
+      <div className="viewer-tabs">
+        {tabs.map((t) => (
+          <div
+            key={t.key}
+            className={`viewer-tab${t.key === active ? " active" : ""}`}
+            onClick={() => setTab(t.key)}
+            title={t.label}
+          >
+            {t.icon}
+            <span className="viewer-tab-label">{t.label}</span>
+            <CloseOutlined
+              className="viewer-tab-close"
+              onClick={(e) => {
+                e.stopPropagation();
+                closeTab(t.key);
+              }}
+            />
+          </div>
+        ))}
+      </div>
+
+      {/* 文件/diff：仅当前激活时显示 */}
+      {content && active === "content" && <ContentBody content={content} />}
+
+      {/* 终端：常驻挂载（输出会持续累积），非激活时 CSS 隐藏，切回不丢历史 */}
+      {terminalOpen && (
+        <div className="viewer-tab-pane" style={{ display: active === "terminal" ? "flex" : "none" }}>
+          <TerminalPanel />
+        </div>
+      )}
+
+      {/* 浏览器：原生子 webview，非激活时必须卸载（CSS 隐藏不掉原生层），切回重新导航 */}
+      {browserUrl !== null && active === "browser" && <BrowserView url={browserUrl} />}
+    </div>
+  );
+}
+
+function baseName(path: string): string {
+  const parts = path.split("/");
+  return parts[parts.length - 1] || path;
 }

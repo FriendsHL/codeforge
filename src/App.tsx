@@ -30,7 +30,9 @@ function App() {
   const model = useChatStore((s) => s.model);
   const { root, name } = useWorkspaceStore();
   const branch = useGitStore((s) => s.branch);
-  const viewerOpen = useViewerStore((s) => s.content !== null);
+  const viewerOpen = useViewerStore(
+    (s) => s.content !== null || s.browserUrl !== null || s.terminalOpen,
+  );
   const { widths, resize } = useUiStore();
   const { mode, toggle } = useThemeStore();
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -109,9 +111,9 @@ function App() {
                 type="text"
                 icon={<GlobalOutlined />}
                 onClick={() => {
-                  const { content, openBrowser, close } = useViewerStore.getState();
-                  if (content?.type === "browser") close();
-                  else openBrowser();
+                  const v = useViewerStore.getState();
+                  if (v.browserUrl !== null) v.closeTab("browser");
+                  else v.openBrowser();
                 }}
               />
             </Tooltip>

@@ -12,6 +12,7 @@ import { termWrite } from "../lib/terminal";
 import { useGitStore } from "./gitStore";
 import { useSessionStore } from "./sessionStore";
 import { useTodoStore } from "./todoStore";
+import { useViewerStore } from "./viewerStore";
 
 const SLASH_HELP = `可用快捷命令：
 - \`/tools\` 当前可用工具清单
@@ -155,7 +156,6 @@ interface ChatState {
   streaming: boolean;
   error: string | null;
   model: string;
-  terminalOpen: boolean;
   mode: import("../lib/ipc").AgentMode;
   setMode: (mode: import("../lib/ipc").AgentMode) => void;
   currentSessionId: number | null;
@@ -184,7 +184,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
   streaming: false,
   error: null,
   model: localStorage.getItem(MODEL_STORAGE_KEY) ?? DEFAULT_MODEL,
-  terminalOpen: false,
   mode: (localStorage.getItem("codeforge.mode") as import("../lib/ipc").AgentMode) || "ask",
   currentSessionId: null,
   sessionTokens: 0,
@@ -400,7 +399,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             if (event.name === "bash") {
               const cmd = (event.input as { command?: string })?.command ?? "";
               termWrite(`\r\n\x1b[1;33m$ ${cmd}\x1b[0m\r\n`);
-              set({ terminalOpen: true });
+              useViewerStore.getState().openTerminal();
             }
             break;
           case "commandOutput":

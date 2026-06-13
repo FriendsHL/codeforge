@@ -5,7 +5,8 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { stopGeneration } from "../../lib/ipc";
 import { contextWindowFor } from "../../lib/models";
-import { ChatItem, useChatStore } from "../../stores/chatStore";
+import { useChatStore } from "../../stores/chatStore";
+import { fmtTokens, ringColor, toBlocks, workingLabel } from "./chatHelpers";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
 import { ApprovalCard } from "./ApprovalCard";
 import { MentionPicker } from "./MentionPicker";
@@ -13,52 +14,6 @@ import { SubagentGroup } from "./SubagentGroup";
 import { ThinkingCard } from "./ThinkingCard";
 import { TodoPanel } from "./TodoPanel";
 import { ToolCallCard } from "./ToolCallCard";
-import { TerminalPanel } from "../terminal/TerminalPanel";
-
-type ToolItem = Extract<ChatItem, { kind: "tool" }>;
-
-/** 子 agent 的工具调用（事件 id 带 -sN- 前缀）；连续的合并为一个折叠组 */
-function isSubagentTool(item: ChatItem): item is ToolItem {
-  return item.kind === "tool" && /-s\d+-/.test(item.id);
-}
-
-type RenderBlock =
-  | { type: "item"; item: ChatItem; index: number }
-  | { type: "subagents"; items: ToolItem[]; key: string };
-
-function toBlocks(items: ChatItem[]): RenderBlock[] {
-  const blocks: RenderBlock[] = [];
-  for (let i = 0; i < items.length; i++) {
-    const item = items[i];
-    if (isSubagentTool(item)) {
-      const last = blocks[blocks.length - 1];
-      if (last?.type === "subagents") {
-        last.items.push(item);
-      } else {
-        blocks.push({ type: "subagents", items: [item], key: item.id });
-      }
-    } else {
-      blocks.push({ type: "item", item, index: i });
-    }
-  }
-  return blocks;
-}
-
-/** 流式期间的状态指示：根据最后一个条目推断 agent 正在干什么 */
-function workingLabel(items: ChatItem[]): string {
-  const last = items[items.length - 1];
-  if (last?.kind === "approval" && !last.decision) return "等待你的审批";
-  if (last?.kind === "tool" && !last.done) return "执行工具中";
-  if (last?.kind === "msg" && last.role === "assistant" && last.content) return "回答中";
-  return "思考中";
-}
-
-/** 把 tokens 数压成易读的 1.2k / 34.5k 形式 */
-function fmtTokens(n: number): string {
-  if (n < 1000) return `${n}`;
-  if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`;
-  return `${(n / 1_000_000).toFixed(2)}M`;
-}
 
 /** 底部上下文/花费状态条：上下文占用进度 + 本轮花费 + 本会话累计花费 */
 function ContextStatusBar({
@@ -109,13 +64,6 @@ function ContextStatusBar({
   );
 }
 
-/** 占比 0~100 映射到颜色：占得越满，色相越偏红、明度越深 */
-function ringColor(pct: number): string {
-  const hue = Math.round(140 - (140 * pct) / 100); // 绿(140) → 红(0)
-  const light = Math.round(66 - (30 * pct) / 100); // 浅(66%) → 深(36%)
-  return `hsl(${hue}, 72%, ${light}%)`;
-}
-
 /** 发送区旁的环形上下文占比：弧长=占比，颜色随占比加深，悬停看百分比 */
 function ContextRing({ model, contextTokens }: { model: string; contextTokens: number | null }) {
   if (contextTokens === null) return null;
@@ -159,7 +107,6 @@ export function ChatView() {
     send,
     queue,
     clear,
-    terminalOpen,
     sessionTokens,
     sessionInputTokens,
     sessionCacheTokens,
@@ -280,8 +227,6 @@ export function ChatView() {
       </div>
 
       <TodoPanel />
-
-      {terminalOpen && <TerminalPanel />}
 
       {(sessionTokens > 0 || sessionInputTokens > 0 || contextTokens !== null) && (
         <ContextStatusBar
