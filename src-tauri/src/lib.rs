@@ -39,6 +39,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
+            // 首次运行把内置 agent 角色落成可编辑文件（~/.codeforge/agents），之后不覆盖
+            agents::seed_builtins();
             // SQLite 放 app data 目录（~/Library/Application Support/com.codeforge.desktop）
             use tauri::Manager;
             let data_dir = app.path().app_data_dir()?;

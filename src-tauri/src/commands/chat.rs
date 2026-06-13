@@ -50,6 +50,10 @@ pub async fn send_message(
         }) as Arc<dyn crate::tools::registry::Tool>);
         tools.push(Arc::new(crate::tools::remember::RememberTool { app: app.clone() })
             as Arc<dyn crate::tools::registry::Tool>);
+        tools.push(Arc::new(crate::tools::agent_roles::SaveAgentTool { app: app.clone() })
+            as Arc<dyn crate::tools::registry::Tool>);
+        tools.push(Arc::new(crate::tools::agent_roles::DeleteAgentTool { app: app.clone() })
+            as Arc<dyn crate::tools::registry::Tool>);
         for connection in mcp.manager.lock().unwrap().connections() {
             tools.extend(McpToolAdapter::wrap_all(&connection));
         }

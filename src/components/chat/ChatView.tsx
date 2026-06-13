@@ -22,6 +22,7 @@ const ROLE_LABELS: Record<string, string> = {
   product: "产品方案",
   dev: "开发",
   review: "Review",
+  test: "测试",
 };
 const roleLabel = (name: string) => ROLE_LABELS[name] ?? name;
 
