@@ -25,6 +25,7 @@ const TOOL_LABELS: Record<string, string> = {
   spawn_subagents: "子agent团队",
   browser_open: "打开浏览器",
   todo_write: "更新任务清单",
+  remember: "记住",
 };
 
 function summarizeInput(name: string, input: unknown): string {
@@ -52,6 +53,8 @@ function summarizeInput(name: string, input: unknown): string {
       const tasks = obj.tasks as { title?: string }[] | undefined;
       return (tasks ?? []).map((t) => t.title).filter(Boolean).join(" | ");
     }
+    case "remember":
+      return String(obj.content ?? "");
     case "git_status":
       return "";
     case "git_diff":

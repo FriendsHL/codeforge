@@ -4,6 +4,7 @@ pub mod fs;
 pub mod git;
 pub mod mcp_adapter;
 pub mod registry;
+pub mod remember;
 pub mod search;
 pub mod todo;
 pub mod web;

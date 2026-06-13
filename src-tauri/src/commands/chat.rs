@@ -40,6 +40,8 @@ pub async fn send_message(
             todos: todos.clone(),
             app: app.clone(),
         }) as Arc<dyn crate::tools::registry::Tool>);
+        tools.push(Arc::new(crate::tools::remember::RememberTool { app: app.clone() })
+            as Arc<dyn crate::tools::registry::Tool>);
         for connection in mcp.manager.lock().unwrap().connections() {
             tools.extend(McpToolAdapter::wrap_all(&connection));
         }

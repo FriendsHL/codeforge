@@ -54,6 +54,14 @@ pub fn list_capabilities(
         name: "browser_open".into(),
         description: "在内嵌浏览器面板中打开 URL 给用户看".into(),
     });
+    tools.push(CapabilityItem {
+        name: "todo_write".into(),
+        description: "维护多步任务的待办清单".into(),
+    });
+    tools.push(CapabilityItem {
+        name: "remember".into(),
+        description: "把值得长期记住的事实写入持久记忆（跨会话）".into(),
+    });
     for connection in mcp.manager.lock().unwrap().connections() {
         for def in &connection.tools {
             tools.push(CapabilityItem {

@@ -5,6 +5,7 @@ mod config;
 mod git;
 mod llm;
 mod mcp;
+mod memory;
 mod pty;
 mod security;
 mod session;
