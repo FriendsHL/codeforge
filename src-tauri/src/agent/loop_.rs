@@ -805,6 +805,7 @@ fn spawn_team(ctx: &AgentCtx, input: &Value, on_event: &EventSink<'_>) -> Result
         let team = ctx.team.clone();
         let bg = ctx.bg_events.clone();
         let id_for_task = id.clone();
+        let title_for_task = title.clone();
 
         tokio::spawn(async move {
             // 后台 agent 的内部事件不进主会话流（避免与主 agent 输出交错）
@@ -818,8 +819,18 @@ fn spawn_team(ctx: &AgentCtx, input: &Value, on_event: &EventSink<'_>) -> Result
                 None,
             )
             .await;
+            // 完成推送（对齐 Claude Code / OpenClaw）：把"任务结束"投进协调者信箱，
+            // 主 agent 下一步即可看到，无需主动轮询 team_status 才发现完事。
+            let done_note = match &result {
+                Ok(r) => {
+                    let brief: String = r.chars().take(280).collect();
+                    format!("✅ 任务完成。摘要：{brief}")
+                }
+                Err(e) => format!("❌ 任务失败：{e}"),
+            };
             team.finish(&id_for_task, result);
-            // 完成即刷新任务看板
+            team.post_message(&id_for_task, &title_for_task, &done_note);
+            // 刷新任务看板
             if let Some(emit) = &bg {
                 emit(AgentEvent::TeamUpdate { tasks: team.snapshot() });
             }
@@ -1217,6 +1228,18 @@ mod tests {
         // team_status 能查到这些任务
         let status = team_status(&ctx, &serde_json::json!({}), &|_e| {});
         assert!(status.contains("查A") && status.contains("审B"));
+
+        // 完成推送：后台任务收尾（cancel=true 会立即 bail）后，应把"任务结束"投进协调者信箱
+        let mut done_msgs = Vec::new();
+        for _ in 0..50 {
+            done_msgs.extend(ctx.team.drain_inbox());
+            if done_msgs.len() >= 2 {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert_eq!(done_msgs.len(), 2, "两个任务都应推送完成消息");
+        assert!(done_msgs.iter().all(|m| m.content.contains("任务完成") || m.content.contains("任务失败")));
     }
 
     /// 端到端 live 验证：spawn_team 真的在后台跑通一个 agent 并回填结果。
