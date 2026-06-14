@@ -43,6 +43,7 @@ export type AgentEvent =
         result: string | null;
       }[];
     }
+  | { type: "teamMessage"; fromId: string; fromTitle: string; content: string }
   | {
       type: "usage";
       callInput: number;

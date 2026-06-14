@@ -26,11 +26,28 @@ pub struct TaskRecord {
     pub result: Option<String>,
 }
 
-/// 后台任务注册表（线程安全，存 AppState）
+/// 后台 agent 的自我身份（让它的 report 工具知道"我是谁"）
+#[derive(Debug, Clone)]
+pub struct TeamTaskHandle {
+    pub id: String,
+    pub title: String,
+}
+
+/// 子 agent 发给主 agent（协调者）的消息
+#[derive(Debug, Clone)]
+pub struct AgentMessage {
+    pub from_id: String,
+    pub from_title: String,
+    pub content: String,
+}
+
+/// 后台任务注册表 + 协调者信箱（线程安全，存 AppState）
 #[derive(Default)]
 pub struct TeamRegistry {
     tasks: Mutex<HashMap<String, TaskRecord>>,
     counter: AtomicUsize,
+    /// 子 agent → 主 agent 的消息队列（主 loop 每轮抽取注入）
+    inbox: Mutex<Vec<AgentMessage>>,
 }
 
 impl TeamRegistry {
@@ -87,6 +104,20 @@ impl TeamRegistry {
             .filter(|t| t.status == TaskStatus::Running)
             .count()
     }
+
+    /// 子 agent 投递一条给协调者的消息
+    pub fn post_message(&self, from_id: &str, from_title: &str, content: &str) {
+        self.inbox.lock().unwrap().push(AgentMessage {
+            from_id: from_id.to_string(),
+            from_title: from_title.to_string(),
+            content: content.to_string(),
+        });
+    }
+
+    /// 主 loop 抽取（清空）信箱
+    pub fn drain_inbox(&self) -> Vec<AgentMessage> {
+        std::mem::take(&mut *self.inbox.lock().unwrap())
+    }
 }
 
 #[cfg(test)]
@@ -118,6 +149,19 @@ mod tests {
         let snap = reg.snapshot();
         assert_eq!(snap[0].status, TaskStatus::Failed);
         assert_eq!(snap[0].result.as_deref(), Some("超时"));
+    }
+
+    #[test]
+    fn inbox_post_and_drain() {
+        let reg = TeamRegistry::default();
+        reg.post_message("t0", "查文档", "发现 X，需要你确认方向");
+        reg.post_message("t1", "审代码", "第3处有空指针风险");
+        let msgs = reg.drain_inbox();
+        assert_eq!(msgs.len(), 2);
+        assert_eq!(msgs[0].from_id, "t0");
+        assert!(msgs[1].content.contains("空指针"));
+        // 抽取后清空
+        assert!(reg.drain_inbox().is_empty());
     }
 
     #[test]

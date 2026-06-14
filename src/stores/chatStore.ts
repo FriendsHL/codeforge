@@ -453,6 +453,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
           case "teamUpdate":
             useTeamStore.getState().set(event.tasks);
             break;
+          case "teamMessage":
+            update((items) => {
+              items.push({
+                kind: "notice",
+                text: `📨 ${event.fromTitle}（${event.fromId}）汇报：${event.content}`,
+              });
+              return items;
+            });
+            break;
           case "usage":
             // 每次 LLM 调用上报一次：累加 session 总量与本轮花费，刷新上下文占用
             set((s) => ({

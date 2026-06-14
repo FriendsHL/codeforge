@@ -121,6 +121,7 @@ pub async fn send_message(
         role,
         team: state.team.clone(),
         bg_events: Some(bg_events),
+        team_task: None,
     };
     let result = run_agent_loop(&ctx, history, &on_event).await;
     state.generating.store(false, std::sync::atomic::Ordering::SeqCst);

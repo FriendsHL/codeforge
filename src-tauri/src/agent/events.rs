@@ -57,6 +57,9 @@ pub enum AgentEvent {
     /// 团队任务快照更新（前端任务看板据此刷新）
     #[serde(rename_all = "camelCase")]
     TeamUpdate { tasks: Vec<crate::agent::team::TaskRecord> },
+    /// 后台子 agent 主动汇报给协调者（前端显示为系统注记）
+    #[serde(rename_all = "camelCase")]
+    TeamMessage { from_id: String, from_title: String, content: String },
     #[serde(rename_all = "camelCase")]
     Error { message: String },
 }

@@ -22,6 +22,7 @@ const EVENT_OUTPUT_PREVIEW_CHARS: usize = 2000;
 const SUBAGENT_TOOL: &str = "spawn_subagents";
 const SPAWN_TEAM_TOOL: &str = "spawn_team";
 const TEAM_STATUS_TOOL: &str = "team_status";
+const REPORT_TOOL: &str = "report_to_coordinator";
 const MAX_SUBAGENTS: usize = 4;
 
 /// 交互模式：决定审批策略和可用工具集
@@ -75,6 +76,9 @@ pub struct AgentCtx {
     /// 后台任务用的 'static 事件发射器（背景 agent 完成时推 TeamUpdate）；
     /// 用通用闭包避免和 tauri 耦合。None=无前端通道（如测试）。
     pub bg_events: Option<Arc<dyn Fn(AgentEvent) + Send + Sync>>,
+    /// 若本 agent 是 spawn_team 派出的后台任务，这里是它的身份（id+标题），
+    /// 据此用 report_to_coordinator 向主 agent 汇报。None=主 agent 或同步子 agent。
+    pub team_task: Option<crate::agent::team::TeamTaskHandle>,
 }
 
 impl AgentCtx {
@@ -99,6 +103,7 @@ impl AgentCtx {
             role,
             team: self.team.clone(),
             bg_events: self.bg_events.clone(),
+            team_task: None, // 派生子上下文默认非团队任务；spawn_team 会显式设置
         }
     }
 }
@@ -206,7 +211,8 @@ fn spawn_team_spec() -> ToolSpec {
         description: "把若干任务派给后台 agent 并行执行，立即返回各自的 task_id（不阻塞）。\
 与 spawn_subagents 的区别：spawn_subagents 会等全部跑完才返回结果；spawn_team 是「派完就走」，\
 你可以先干别的，之后用 team_status 查进度/收结果。适合长耗时、可并行、不必马上要结果的活。\
-每个任务可指定 role（research/product/dev/review/test 等）。".into(),
+每个任务可指定 role（research/product/dev/review/test 等）。\
+派出的后台 agent 可主动向你汇报关键进展（你会在后续步骤看到「📨…汇报」），看到后可据此调整或收口。".into(),
         input_schema: json!({
             "type": "object",
             "properties": {
@@ -240,6 +246,21 @@ fn team_status_spec() -> ToolSpec {
                 "ids": {"type": "array", "items": {"type": "string"}, "description": "只查这些 task_id（省略=全部）"}
             },
             "required": []
+        }),
+    }
+}
+
+fn report_spec() -> ToolSpec {
+    ToolSpec {
+        name: REPORT_TOOL.into(),
+        description: "向主 agent（协调者）主动汇报：进度、关键发现、需要的决策，或遇到的障碍。\
+不必等到任务结束——跑到关键节点就可以报。主 agent 会在下一步看到你的消息并可能调整方向。".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "content": {"type": "string", "description": "要汇报给主 agent 的内容（写清楚，它没有你的上下文）"}
+            },
+            "required": ["content"]
         }),
     }
 }
@@ -318,6 +339,10 @@ async fn loop_body(
             tools.push(spawn_team_spec());
             tools.push(team_status_spec());
         }
+        // 后台团队任务才有的「向协调者汇报」工具
+        if ctx.team_task.is_some() {
+            tools.push(report_spec());
+        }
 
         let mut final_text = String::new();
         // 本轮已 read_file 过的文件（read-before-edit 闸门 + 重复读去重）
@@ -334,6 +359,19 @@ async fn loop_body(
             if is_main {
                 for q in drain_pending(ctx) {
                     history.push(HistoryItem::User(q));
+                }
+                // 协调者模式：抽取后台子 agent 的主动汇报，注入上下文供主 agent 反应
+                for msg in ctx.team.drain_inbox() {
+                    let line = format!(
+                        "📨 来自后台团队任务 {}「{}」的汇报：{}",
+                        msg.from_id, msg.from_title, msg.content
+                    );
+                    on_event(AgentEvent::TeamMessage {
+                        from_id: msg.from_id,
+                        from_title: msg.from_title,
+                        content: msg.content,
+                    });
+                    history.push(HistoryItem::User(line));
                 }
             }
             // 轮内压缩：先微压缩（重复读去重，无损），再按预算清理旧结果
@@ -565,6 +603,19 @@ async fn execute_call(
         }
     } else if call.name == TEAM_STATUS_TOOL {
         Ok(team_status(ctx, &input, on_event))
+    } else if call.name == REPORT_TOOL {
+        match &ctx.team_task {
+            Some(handle) => {
+                let content = input["content"].as_str().unwrap_or("").trim();
+                if content.is_empty() {
+                    Err("content 不能为空".into())
+                } else {
+                    ctx.team.post_message(&handle.id, &handle.title, content);
+                    Ok("已把消息投递给主 agent（协调者），它会在下一步看到。".into())
+                }
+            }
+            None => Err("只有 spawn_team 派出的后台任务能用 report_to_coordinator".into()),
+        }
     } else {
         execute_tool(ctx, &event_id, &call.name, input.clone(), on_event).await
     };
@@ -708,6 +759,11 @@ fn spawn_team(ctx: &AgentCtx, input: &Value, on_event: &EventSink<'_>) -> Result
         // （危险操作仍会触发审批——背景任务里应避免，属 v1 已知限制。）
         let mut child = ctx.child_with_role(role);
         child.mode = AgentMode::Auto;
+        // 赋予身份：据此用 report_to_coordinator 向主 agent 汇报
+        child.team_task = Some(crate::agent::team::TeamTaskHandle {
+            id: id.clone(),
+            title: title.clone(),
+        });
         let team = ctx.team.clone();
         let bg = ctx.bg_events.clone();
         let id_for_task = id.clone();
@@ -1066,6 +1122,7 @@ mod tests {
             role,
             team: Arc::new(crate::agent::team::TeamRegistry::default()),
             bg_events: None,
+            team_task: None,
         }
     }
 
@@ -1090,6 +1147,7 @@ mod tests {
             role: None,
             team: Arc::new(crate::agent::team::TeamRegistry::default()),
             bg_events: None,
+            team_task: None,
         }
     }
 
@@ -1150,6 +1208,50 @@ mod tests {
         assert!(snap[0].result.as_ref().unwrap().contains('2'), "结果应包含 2");
     }
 
+    /// 功能验证：后台 agent 的 report_to_coordinator 真的把消息投进协调者信箱
+    #[tokio::test]
+    async fn report_tool_posts_to_inbox() {
+        let mut ctx = offline_ctx();
+        ctx.team_task = Some(crate::agent::team::TeamTaskHandle {
+            id: "t0".into(),
+            title: "查依赖".into(),
+        });
+        let call = ToolCall {
+            id: "r1".into(),
+            name: "report_to_coordinator".into(),
+            arguments: "{\"content\":\"发现 X 库已废弃，建议换 Y\"}".into(),
+        };
+        let read_files = Arc::new(std::sync::Mutex::new(std::collections::HashSet::new()));
+        let result = execute_call(&ctx, "", &call, &|_e| {}, None, false, &read_files).await;
+        match result {
+            HistoryItem::ToolResult { is_error, .. } => assert!(!is_error, "汇报应成功"),
+            _ => panic!(),
+        }
+        let msgs = ctx.team.drain_inbox();
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0].from_id, "t0");
+        assert_eq!(msgs[0].from_title, "查依赖");
+        assert!(msgs[0].content.contains("废弃"));
+    }
+
+    /// 非团队 agent 不能用 report_to_coordinator
+    #[tokio::test]
+    async fn report_tool_rejected_without_team_task() {
+        let ctx = offline_ctx(); // team_task = None
+        let call = ToolCall {
+            id: "r1".into(),
+            name: "report_to_coordinator".into(),
+            arguments: "{\"content\":\"x\"}".into(),
+        };
+        let read_files = Arc::new(std::sync::Mutex::new(std::collections::HashSet::new()));
+        let result = execute_call(&ctx, "", &call, &|_e| {}, None, false, &read_files).await;
+        match result {
+            HistoryItem::ToolResult { is_error, .. } => assert!(is_error, "非团队 agent 应被拒"),
+            _ => panic!(),
+        }
+        assert!(ctx.team.drain_inbox().is_empty());
+    }
+
     /// 功能验证：review 角色在执行期真的拦截 edit_file（不止是 spec 过滤）
     #[tokio::test]
     async fn review_role_blocks_edit_at_execution() {
@@ -1198,6 +1300,7 @@ mod tests {
             role: None,
             team: Arc::new(crate::agent::team::TeamRegistry::default()),
             bg_events: None,
+            team_task: None,
         }
     }
 
