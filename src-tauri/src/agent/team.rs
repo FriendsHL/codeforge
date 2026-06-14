@@ -41,13 +41,15 @@ pub struct AgentMessage {
     pub content: String,
 }
 
-/// 后台任务注册表 + 协调者信箱（线程安全，存 AppState）
+/// 后台任务注册表 + 双向信箱（线程安全，存 AppState）
 #[derive(Default)]
 pub struct TeamRegistry {
     tasks: Mutex<HashMap<String, TaskRecord>>,
     counter: AtomicUsize,
     /// 子 agent → 主 agent 的消息队列（主 loop 每轮抽取注入）
     inbox: Mutex<Vec<AgentMessage>>,
+    /// 主 agent → 各子 agent 的指令信箱（task_id → 指令队列；子 agent 每轮抽取）
+    mailboxes: Mutex<HashMap<String, Vec<String>>>,
 }
 
 impl TeamRegistry {
@@ -118,6 +120,36 @@ impl TeamRegistry {
     pub fn drain_inbox(&self) -> Vec<AgentMessage> {
         std::mem::take(&mut *self.inbox.lock().unwrap())
     }
+
+    /// 该任务是否在运行中（主 agent 下指令前判断有没有意义）
+    pub fn is_running(&self, id: &str) -> bool {
+        self.tasks
+            .lock()
+            .unwrap()
+            .get(id)
+            .map(|t| t.status == TaskStatus::Running)
+            .unwrap_or(false)
+    }
+
+    /// 主 agent 给某个子 agent 投递一条指令
+    pub fn post_to_agent(&self, id: &str, content: &str) {
+        self.mailboxes
+            .lock()
+            .unwrap()
+            .entry(id.to_string())
+            .or_default()
+            .push(content.to_string());
+    }
+
+    /// 子 agent 抽取（清空）自己的指令信箱
+    pub fn drain_agent_mailbox(&self, id: &str) -> Vec<String> {
+        self.mailboxes
+            .lock()
+            .unwrap()
+            .get_mut(id)
+            .map(std::mem::take)
+            .unwrap_or_default()
+    }
 }
 
 #[cfg(test)]
@@ -162,6 +194,21 @@ mod tests {
         assert!(msgs[1].content.contains("空指针"));
         // 抽取后清空
         assert!(reg.drain_inbox().is_empty());
+    }
+
+    #[test]
+    fn agent_mailbox_post_and_drain() {
+        let reg = TeamRegistry::default();
+        let id = reg.next_id();
+        reg.start(&id, "开发X", None);
+        assert!(reg.is_running(&id));
+        reg.post_to_agent(&id, "改用方案B");
+        reg.post_to_agent(&id, "记得加测试");
+        let msgs = reg.drain_agent_mailbox(&id);
+        assert_eq!(msgs, vec!["改用方案B".to_string(), "记得加测试".to_string()]);
+        // 抽取后清空；未知任务返回空
+        assert!(reg.drain_agent_mailbox(&id).is_empty());
+        assert!(reg.drain_agent_mailbox("nope").is_empty());
     }
 
     #[test]

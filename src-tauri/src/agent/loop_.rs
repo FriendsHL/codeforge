@@ -23,6 +23,7 @@ const SUBAGENT_TOOL: &str = "spawn_subagents";
 const SPAWN_TEAM_TOOL: &str = "spawn_team";
 const TEAM_STATUS_TOOL: &str = "team_status";
 const REPORT_TOOL: &str = "report_to_coordinator";
+const INSTRUCT_TOOL: &str = "instruct_agent";
 const MAX_SUBAGENTS: usize = 4;
 
 /// 交互模式：决定审批策略和可用工具集
@@ -250,6 +251,22 @@ fn team_status_spec() -> ToolSpec {
     }
 }
 
+fn instruct_spec() -> ToolSpec {
+    ToolSpec {
+        name: INSTRUCT_TOOL.into(),
+        description: "给一个正在运行的后台团队任务（spawn_team 派出的）中途下达指令：纠偏、补充上下文、或让它收尾。\
+该子 agent 会在下一步抽到你的指令并据此调整。用 team_status 拿 task_id。只对运行中的任务有效。".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "id": {"type": "string", "description": "目标后台任务的 task_id"},
+                "content": {"type": "string", "description": "给它的指令内容"}
+            },
+            "required": ["id", "content"]
+        }),
+    }
+}
+
 fn report_spec() -> ToolSpec {
     ToolSpec {
         name: REPORT_TOOL.into(),
@@ -338,6 +355,7 @@ async fn loop_body(
         if is_main && !plan_only && role_allows(SPAWN_TEAM_TOOL) {
             tools.push(spawn_team_spec());
             tools.push(team_status_spec());
+            tools.push(instruct_spec());
         }
         // 后台团队任务才有的「向协调者汇报」工具
         if ctx.team_task.is_some() {
@@ -372,6 +390,11 @@ async fn loop_body(
                         content: msg.content,
                     });
                     history.push(HistoryItem::User(line));
+                }
+            } else if let Some(handle) = &ctx.team_task {
+                // 后台团队 agent：抽取主 agent 中途下达的指令，纳入当前工作
+                for instruction in ctx.team.drain_agent_mailbox(&handle.id) {
+                    history.push(HistoryItem::User(format!("📩 协调者指令：{instruction}")));
                 }
             }
             // 轮内压缩：先微压缩（重复读去重，无损），再按预算清理旧结果
@@ -603,6 +626,21 @@ async fn execute_call(
         }
     } else if call.name == TEAM_STATUS_TOOL {
         Ok(team_status(ctx, &input, on_event))
+    } else if call.name == INSTRUCT_TOOL {
+        if is_main {
+            let id = input["id"].as_str().unwrap_or("").trim();
+            let content = input["content"].as_str().unwrap_or("").trim();
+            if id.is_empty() || content.is_empty() {
+                Err("instruct_agent 需要 id 和 content".into())
+            } else if !ctx.team.is_running(id) {
+                Ok(format!("任务 {id} 不在运行中（可能已完成或不存在），指令未投递。用 team_status 查当前任务。"))
+            } else {
+                ctx.team.post_to_agent(id, content);
+                Ok(format!("已把指令投给后台任务 {id}，它会在下一步抽到。"))
+            }
+        } else {
+            Err("只有主 agent（协调者）能给后台任务下指令".into())
+        }
     } else if call.name == REPORT_TOOL {
         match &ctx.team_task {
             Some(handle) => {
@@ -1250,6 +1288,42 @@ mod tests {
             _ => panic!(),
         }
         assert!(ctx.team.drain_inbox().is_empty());
+    }
+
+    /// 功能验证：主 agent 的 instruct_agent 把指令投进运行中任务的信箱；任务不在跑则不投
+    #[tokio::test]
+    async fn instruct_agent_posts_to_running_task_mailbox() {
+        let ctx = offline_ctx();
+        let id = ctx.team.next_id();
+        ctx.team.start(&id, "开发X", Some("dev".into()));
+        let read_files = Arc::new(std::sync::Mutex::new(std::collections::HashSet::new()));
+
+        // 运行中 → 指令进信箱
+        let call = ToolCall {
+            id: "i1".into(),
+            name: "instruct_agent".into(),
+            arguments: format!("{{\"id\":\"{id}\",\"content\":\"改用方案B\"}}"),
+        };
+        let r = execute_call(&ctx, "", &call, &|_e| {}, None, true, &read_files).await;
+        match r {
+            HistoryItem::ToolResult { is_error, .. } => assert!(!is_error),
+            _ => panic!(),
+        }
+        assert_eq!(ctx.team.drain_agent_mailbox(&id), vec!["改用方案B".to_string()]);
+
+        // 任务已完成 → 不投递，明确提示
+        ctx.team.finish(&id, Ok("done".into()));
+        let call2 = ToolCall {
+            id: "i2".into(),
+            name: "instruct_agent".into(),
+            arguments: format!("{{\"id\":\"{id}\",\"content\":\"再改\"}}"),
+        };
+        let r2 = execute_call(&ctx, "", &call2, &|_e| {}, None, true, &read_files).await;
+        match r2 {
+            HistoryItem::ToolResult { content, .. } => assert!(content.contains("不在运行")),
+            _ => panic!(),
+        }
+        assert!(ctx.team.drain_agent_mailbox(&id).is_empty());
     }
 
     /// 功能验证：review 角色在执行期真的拦截 edit_file（不止是 spec 过滤）
