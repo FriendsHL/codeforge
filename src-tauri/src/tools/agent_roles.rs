@@ -75,6 +75,8 @@ impl super::registry::Tool for SaveAgentTool {
                     "description": {"type": "string", "description": "一句话职责，会出现在 list_agents 里"},
                     "system_prompt": {"type": "string", "description": "角色的 system prompt（人设+工作方式+纪律）"},
                     "tools": {"type": "array", "items": {"type": "string"}, "description": "允许的工具名白名单；省略或空=不限制（全部工具）"},
+                    "model": {"type": "string", "description": "可选：覆盖模型（裸 model id，须与当前会话同一 provider）"},
+                    "maxTurns": {"type": "integer", "description": "可选：该角色 agent 的最大迭代轮数"},
                     "scope": {"type": "string", "enum": ["project", "global"], "description": "project=当前项目，global=跨项目（默认 global）"}
                 },
                 "required": ["name", "description", "system_prompt"]
@@ -91,11 +93,13 @@ impl super::registry::Tool for SaveAgentTool {
             .as_array()
             .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
             .unwrap_or_default();
+        let model = input["model"].as_str().filter(|m| !m.trim().is_empty());
+        let max_turns = input["maxTurns"].as_u64().map(|n| n as usize).filter(|n| *n > 0);
         let scope = input["scope"].as_str().unwrap_or("global");
         let ws = if workspace == std::env::temp_dir() { None } else { Some(workspace) };
         let scope = if ws.is_none() && scope == "project" { "global" } else { scope };
 
-        let path = crate::agents::save_role(scope, ws, name, description, &tools, system_prompt)?;
+        let path = crate::agents::save_role(scope, ws, name, description, &tools, system_prompt, model, max_turns)?;
         let _ = self.app.emit("agents-updated", &path);
         let tools_desc = if tools.is_empty() { "全部工具".into() } else { tools.join(", ") };
         Ok(format!("已保存角色「{name}」（{scope}，工具：{tools_desc}）→ {path}"))

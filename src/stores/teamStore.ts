@@ -4,7 +4,7 @@ export interface TeamTask {
   id: string;
   title: string;
   role: string | null;
-  status: "running" | "done" | "failed";
+  status: "running" | "done" | "failed" | "cancelled";
   result: string | null;
 }
 

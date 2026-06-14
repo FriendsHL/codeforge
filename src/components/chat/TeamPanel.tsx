@@ -5,6 +5,7 @@ import {
   CheckCircleFilled,
   CloseCircleFilled,
   LoadingOutlined,
+  MinusCircleFilled,
 } from "@ant-design/icons";
 import { Tag, Tooltip } from "antd";
 import { useTeamStore } from "../../stores/teamStore";
@@ -42,6 +43,8 @@ export function TeamPanel() {
                 <LoadingOutlined style={{ color: "#d46b08" }} />
               ) : t.status === "done" ? (
                 <CheckCircleFilled style={{ color: "#389e0d" }} />
+              ) : t.status === "cancelled" ? (
+                <MinusCircleFilled style={{ color: "#8c8c8c" }} />
               ) : (
                 <CloseCircleFilled style={{ color: "#cf1322" }} />
               )}

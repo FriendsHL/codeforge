@@ -13,6 +13,7 @@ pub enum TaskStatus {
     Running,
     Done,
     Failed,
+    Cancelled,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -24,7 +25,13 @@ pub struct TaskRecord {
     pub status: TaskStatus,
     /// 完成=书面汇报，失败=错误信息，运行中=None
     pub result: Option<String>,
+    /// 协调者请求取消（best-effort，任务到下个检查点收尾）
+    #[serde(rename = "cancelRequested")]
+    pub cancel_requested: bool,
 }
+
+/// 注册表里保留的任务记录上限（超出淘汰最旧的终态记录，防长会话内存累积）
+const MAX_TASKS: usize = 50;
 
 /// 后台 agent 的自我身份（让它的 report 工具知道"我是谁"）
 #[derive(Debug, Clone)]
@@ -58,7 +65,8 @@ impl TeamRegistry {
     }
 
     pub fn start(&self, id: &str, title: &str, role: Option<String>) {
-        self.tasks.lock().unwrap().insert(
+        let mut tasks = self.tasks.lock().unwrap();
+        tasks.insert(
             id.to_string(),
             TaskRecord {
                 id: id.to_string(),
@@ -66,21 +74,80 @@ impl TeamRegistry {
                 role,
                 status: TaskStatus::Running,
                 result: None,
+                cancel_requested: false,
             },
         );
+        Self::evict_old(&mut tasks);
     }
 
     pub fn finish(&self, id: &str, result: Result<String, String>) {
-        if let Some(rec) = self.tasks.lock().unwrap().get_mut(id) {
-            match result {
-                Ok(r) => {
-                    rec.status = TaskStatus::Done;
-                    rec.result = Some(r);
+        let mut tasks = self.tasks.lock().unwrap();
+        if let Some(rec) = tasks.get_mut(id) {
+            // 被请求取消的任务，无论 loop 返回什么都收敛为 Cancelled
+            if rec.cancel_requested {
+                rec.status = TaskStatus::Cancelled;
+                rec.result = Some(result.unwrap_or_else(|e| e));
+            } else {
+                match result {
+                    Ok(r) => {
+                        rec.status = TaskStatus::Done;
+                        rec.result = Some(r);
+                    }
+                    Err(e) => {
+                        rec.status = TaskStatus::Failed;
+                        rec.result = Some(e);
+                    }
                 }
-                Err(e) => {
-                    rec.status = TaskStatus::Failed;
-                    rec.result = Some(e);
-                }
+            }
+        }
+        Self::evict_old(&mut tasks);
+    }
+
+    /// 超出上限时淘汰最旧的终态任务（按 id 数字序；Running 不淘汰）
+    fn evict_old(tasks: &mut HashMap<String, TaskRecord>) {
+        if tasks.len() <= MAX_TASKS {
+            return;
+        }
+        let mut terminal: Vec<String> = tasks
+            .values()
+            .filter(|t| t.status != TaskStatus::Running)
+            .map(|t| t.id.clone())
+            .collect();
+        // id 形如 "t<n>"，按 n 升序（最旧在前）
+        terminal.sort_by_key(|id| id[1..].parse::<usize>().unwrap_or(0));
+        let to_remove = tasks.len() - MAX_TASKS;
+        for id in terminal.into_iter().take(to_remove) {
+            tasks.remove(&id);
+        }
+    }
+
+    /// 请求取消某个运行中的任务（best-effort）
+    pub fn request_cancel(&self, id: &str) -> bool {
+        let mut tasks = self.tasks.lock().unwrap();
+        match tasks.get_mut(id) {
+            Some(rec) if rec.status == TaskStatus::Running => {
+                rec.cancel_requested = true;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// 该任务是否被请求取消（后台 child 的 is_cancelled 检查它）
+    pub fn is_cancel_requested(&self, id: &str) -> bool {
+        self.tasks
+            .lock()
+            .unwrap()
+            .get(id)
+            .map(|t| t.cancel_requested)
+            .unwrap_or(false)
+    }
+
+    /// 全局停止：把所有运行中的任务标记取消
+    pub fn cancel_all_running(&self) {
+        for rec in self.tasks.lock().unwrap().values_mut() {
+            if rec.status == TaskStatus::Running {
+                rec.cancel_requested = true;
             }
         }
     }
@@ -194,6 +261,62 @@ mod tests {
         assert!(msgs[1].content.contains("空指针"));
         // 抽取后清空
         assert!(reg.drain_inbox().is_empty());
+    }
+
+    #[test]
+    fn cancel_request_and_converge_to_cancelled() {
+        let reg = TeamRegistry::default();
+        let id = reg.next_id();
+        reg.start(&id, "长任务", None);
+        assert!(reg.request_cancel(&id));
+        assert!(reg.is_cancel_requested(&id));
+        // 即使 loop 返回 Ok，被取消的任务也收敛为 Cancelled
+        reg.finish(&id, Ok("部分结果".into()));
+        assert_eq!(reg.snapshot()[0].status, TaskStatus::Cancelled);
+        // 已终态的任务不能再请求取消
+        assert!(!reg.request_cancel(&id));
+    }
+
+    #[test]
+    fn cancel_all_running_marks_only_running() {
+        let reg = TeamRegistry::default();
+        let a = reg.next_id();
+        let b = reg.next_id();
+        reg.start(&a, "A", None);
+        reg.start(&b, "B", None);
+        reg.finish(&b, Ok("done".into())); // b 已完成
+        reg.cancel_all_running();
+        assert!(reg.is_cancel_requested(&a));
+        assert!(!reg.is_cancel_requested(&b), "已完成的不应被标记");
+    }
+
+    #[test]
+    fn evicts_oldest_terminal_over_cap() {
+        let reg = TeamRegistry::default();
+        // 造 MAX_TASKS + 5 个终态任务
+        for _ in 0..(MAX_TASKS + 5) {
+            let id = reg.next_id();
+            reg.start(&id, "t", None);
+            reg.finish(&id, Ok("r".into()));
+        }
+        let snap = reg.snapshot();
+        assert!(snap.len() <= MAX_TASKS, "应淘汰到上限内，实际 {}", snap.len());
+        // 最旧的 t0 应被淘汰
+        assert!(!snap.iter().any(|t| t.id == "t0"));
+    }
+
+    #[test]
+    fn running_tasks_not_evicted() {
+        let reg = TeamRegistry::default();
+        let keep = reg.next_id();
+        reg.start(&keep, "运行中", None); // 一直 Running
+        for _ in 0..(MAX_TASKS + 5) {
+            let id = reg.next_id();
+            reg.start(&id, "t", None);
+            reg.finish(&id, Ok("r".into()));
+        }
+        // Running 的任务即便最旧也不被淘汰
+        assert!(reg.snapshot().iter().any(|t| t.id == keep));
     }
 
     #[test]

@@ -34,6 +34,11 @@ pub async fn send_message(
         .filter(|r| !r.is_empty() && r != "default")
         .and_then(|r| crate::agents::resolve(workspace.as_deref(), &r))
         .map(Arc::new);
+    // 角色可覆盖模型（裸 id，须与当前 provider 同源；用户 UI 选的 provider 不变）
+    let model = role
+        .as_ref()
+        .and_then(|r| r.model.clone())
+        .unwrap_or(model);
     let permissions = state.permissions.clone();
 
     // 本回合的任务清单（todo_write 维护，loop 注入为 system-reminder）
@@ -319,6 +324,8 @@ pub fn revert_checkpoint(
 pub fn stop_generation(state: State<'_, AppState>) -> Result<(), String> {
     state.cancel.store(true, std::sync::atomic::Ordering::SeqCst);
     state.permissions.deny_all_pending();
+    // 后台团队任务标记取消（cancel_requested 是 sticky 的，不会被下个回合 cancel.store(false) 抹掉）
+    state.team.cancel_all_running();
     Ok(())
 }
 

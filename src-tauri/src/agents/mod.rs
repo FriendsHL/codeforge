@@ -18,6 +18,10 @@ pub struct AgentRole {
     pub system_prompt: String,
     /// 允许使用的工具名白名单；空 = 不限制（全部可用）
     pub tools: Vec<String>,
+    /// 可选：覆盖模型（裸 model id，仅在与当前会话同一 provider 内有效）
+    pub model: Option<String>,
+    /// 可选：覆盖该角色 agent 的最大迭代轮数
+    pub max_turns: Option<usize>,
     /// 来源：「项目」/「全局」/「内置」，用于 list_agents 透明展示
     pub source: &'static str,
 }
@@ -46,9 +50,12 @@ fn parse(content: &str, source: &'static str) -> Option<AgentRole> {
     let mut name = None;
     let mut description = String::new();
     let mut tools: Vec<String> = Vec::new();
+    let mut model: Option<String> = None;
+    let mut max_turns: Option<usize> = None;
     let mut body_start = 0usize;
     // 先逐行吃 frontmatter，记下正文起点
     let mut consumed = 1; // 已读掉首行 ---
+    let unquote = |v: &str| v.trim().trim_matches('"').trim_matches('\'').to_string();
     for line in content.lines().skip(1) {
         consumed += 1;
         let t = line.trim();
@@ -57,9 +64,16 @@ fn parse(content: &str, source: &'static str) -> Option<AgentRole> {
             break;
         }
         if let Some(v) = t.strip_prefix("name:") {
-            name = Some(v.trim().trim_matches('"').trim_matches('\'').to_string());
+            name = Some(unquote(v));
         } else if let Some(v) = t.strip_prefix("description:") {
-            description = v.trim().trim_matches('"').trim_matches('\'').to_string();
+            description = unquote(v);
+        } else if let Some(v) = t.strip_prefix("model:") {
+            let v = unquote(v);
+            if !v.is_empty() {
+                model = Some(v);
+            }
+        } else if let Some(v) = t.strip_prefix("maxTurns:") {
+            max_turns = unquote(v).parse::<usize>().ok().filter(|n| *n > 0);
         } else if let Some(v) = t.strip_prefix("tools:") {
             let v = v.trim();
             if v != "*" && !v.is_empty() {
@@ -68,7 +82,7 @@ fn parse(content: &str, source: &'static str) -> Option<AgentRole> {
         }
     }
     let system_prompt = content.lines().skip(body_start).collect::<Vec<_>>().join("\n").trim().to_string();
-    Some(AgentRole { name: name?, description, system_prompt, tools, source })
+    Some(AgentRole { name: name?, description, system_prompt, tools, model, max_turns, source })
 }
 
 fn global_agents_dir() -> Option<PathBuf> {
@@ -147,6 +161,8 @@ pub fn save_role(
     description: &str,
     tools: &[String],
     system_prompt: &str,
+    model: Option<&str>,
+    max_turns: Option<usize>,
 ) -> Result<String, String> {
     let name = sanitize_name(name)?;
     let path = role_file(scope, workspace, &name)?;
@@ -154,11 +170,14 @@ pub fn save_role(
         std::fs::create_dir_all(parent).map_err(|e| format!("创建角色目录失败: {e}"))?;
     }
     let tools_line = if tools.is_empty() { "*".to_string() } else { tools.join(", ") };
-    let content = format!(
-        "---\nname: {name}\ndescription: {}\ntools: {tools_line}\n---\n{}\n",
-        description.trim(),
-        system_prompt.trim()
-    );
+    let mut fm = format!("---\nname: {name}\ndescription: {}\ntools: {tools_line}\n", description.trim());
+    if let Some(m) = model.filter(|m| !m.trim().is_empty()) {
+        fm.push_str(&format!("model: {}\n", m.trim()));
+    }
+    if let Some(n) = max_turns {
+        fm.push_str(&format!("maxTurns: {n}\n"));
+    }
+    let content = format!("{fm}---\n{}\n", system_prompt.trim());
     std::fs::write(&path, content).map_err(|e| format!("写角色失败: {e}"))?;
     Ok(path.display().to_string())
 }
@@ -267,6 +286,8 @@ mod tests {
             "安全审计角色",
             &["read_file".to_string(), "grep".to_string()],
             "你只做安全审计。",
+            Some("doubao-seed-2.0-lite"),
+            Some(15),
         )
         .unwrap();
         assert!(path.ends_with("my-auditor/AGENT.md"));
@@ -279,13 +300,15 @@ mod tests {
         assert_eq!(role.tools, vec!["read_file".to_string(), "grep".to_string()]);
         assert!(role.allows("grep") && !role.allows("bash"));
         assert!(role.system_prompt.contains("安全审计"));
+        assert_eq!(role.model.as_deref(), Some("doubao-seed-2.0-lite"));
+        assert_eq!(role.max_turns, Some(15));
     }
 
     #[test]
     fn save_overrides_builtin_then_delete_restores() {
         let ws = tempfile::tempdir().unwrap();
         // 覆盖内置 review
-        save_role("project", Some(ws.path()), "review", "我的 review", &[], "随便").unwrap();
+        save_role("project", Some(ws.path()), "review", "我的 review", &[], "随便", None, None).unwrap();
         let overridden = discover_in(Some(ws.path()), Some(Path::new("/nonexistent")))
             .into_iter()
             .find(|r| r.name == "review")
@@ -304,7 +327,7 @@ mod tests {
 
     #[test]
     fn sanitize_rejects_path_traversal() {
-        assert!(save_role("global", None, "../evil", "d", &[], "p").is_err());
-        assert!(save_role("global", None, "a/b", "d", &[], "p").is_err());
+        assert!(save_role("global", None, "../evil", "d", &[], "p", None, None).is_err());
+        assert!(save_role("global", None, "a/b", "d", &[], "p", None, None).is_err());
     }
 }

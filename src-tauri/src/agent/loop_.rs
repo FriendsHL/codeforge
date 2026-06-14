@@ -24,6 +24,12 @@ const SPAWN_TEAM_TOOL: &str = "spawn_team";
 const TEAM_STATUS_TOOL: &str = "team_status";
 const REPORT_TOOL: &str = "report_to_coordinator";
 const INSTRUCT_TOOL: &str = "instruct_agent";
+const CANCEL_TOOL: &str = "cancel_agent";
+/// 后台任务的墙钟兜底超时（粗粒度，只为兜住卡死的任务）。
+/// 故意 > bash 自身 max timeout(600s)，让 shell 命令先自我超时返回，不留孤儿进程。
+const TASK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1800);
+/// 全局同时运行的后台团队任务上限
+const MAX_CONCURRENT_TEAM: usize = 8;
 const MAX_SUBAGENTS: usize = 4;
 
 /// 交互模式：决定审批策略和可用工具集
@@ -86,10 +92,15 @@ impl AgentCtx {
     /// 复制一份上下文、换一个角色，用于派发带角色的子 agent。
     /// 共享的状态（registry/permissions/cancel/trace/pending 等）按 Arc 浅拷贝。
     fn child_with_role(&self, role: Option<Arc<crate::agents::AgentRole>>) -> AgentCtx {
+        // 角色可覆盖模型（裸 id，同 provider 内）；否则沿用父模型
+        let model = role
+            .as_ref()
+            .and_then(|r| r.model.clone())
+            .unwrap_or_else(|| self.model.clone());
         AgentCtx {
             endpoint: self.endpoint,
             api_key: self.api_key.clone(),
-            model: self.model.clone(),
+            model,
             registry: self.registry.clone(),
             workspace: self.workspace.clone(),
             permissions: self.permissions.clone(),
@@ -114,7 +125,14 @@ fn drain_pending(ctx: &AgentCtx) -> Vec<String> {
 }
 
 fn is_cancelled(ctx: &AgentCtx) -> bool {
+    // 全局停止；或后台团队任务被单独请求取消（cancel_requested 是 sticky 的，
+    // 不会被新回合的 cancel.store(false) 抹掉）。
     ctx.cancel.load(std::sync::atomic::Ordering::Relaxed)
+        || ctx
+            .team_task
+            .as_ref()
+            .map(|h| ctx.team.is_cancel_requested(&h.id))
+            .unwrap_or(false)
 }
 
 /// 事件回调 trait object（带生命周期参数：调用方的闭包可以借用本地变量）
@@ -267,6 +285,20 @@ fn instruct_spec() -> ToolSpec {
     }
 }
 
+fn cancel_spec() -> ToolSpec {
+    ToolSpec {
+        name: CANCEL_TOOL.into(),
+        description: "请求取消一个正在运行的后台团队任务（spawn_team 派出的）。best-effort：任务会在下个检查点收尾标记为「已取消」；正卡在长命令上的任务可能要等命令自身超时才停。用 team_status 拿 task_id。".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "id": {"type": "string", "description": "要取消的后台任务 task_id"}
+            },
+            "required": ["id"]
+        }),
+    }
+}
+
 fn report_spec() -> ToolSpec {
     ToolSpec {
         name: REPORT_TOOL.into(),
@@ -356,6 +388,7 @@ async fn loop_body(
             tools.push(spawn_team_spec());
             tools.push(team_status_spec());
             tools.push(instruct_spec());
+            tools.push(cancel_spec());
         }
         // 后台团队任务才有的「向协调者汇报」工具
         if ctx.team_task.is_some() {
@@ -367,7 +400,9 @@ async fn loop_body(
         let read_files: std::sync::Arc<std::sync::Mutex<std::collections::HashSet<String>>> =
             std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashSet::new()));
 
-        for iteration in 0..MAX_ITERATIONS {
+        // 角色可覆盖最大迭代轮数（maxTurns），否则用默认
+        let max_iter = ctx.role.as_ref().and_then(|r| r.max_turns).unwrap_or(MAX_ITERATIONS);
+        for iteration in 0..max_iter {
             // 任务清单作为 system-reminder 拼在 system 末尾（随清单变化，故每轮重建）
             let system = match crate::tools::todo::reminder(&ctx.todos) {
                 Some(r) => format!("{base_system}\n\n{r}"),
@@ -541,7 +576,7 @@ async fn loop_body(
             }
         }
 
-        Err(format!("达到最大迭代次数（{MAX_ITERATIONS}），任务可能过于复杂，请拆小后重试"))
+        Err(format!("达到最大迭代次数（{max_iter}），任务可能过于复杂，请拆小后重试"))
     }
 }
 
@@ -626,6 +661,19 @@ async fn execute_call(
         }
     } else if call.name == TEAM_STATUS_TOOL {
         Ok(team_status(ctx, &input, on_event))
+    } else if call.name == CANCEL_TOOL {
+        if is_main {
+            let id = input["id"].as_str().unwrap_or("").trim();
+            if id.is_empty() {
+                Err("cancel_agent 需要 id".into())
+            } else if ctx.team.request_cancel(id) {
+                Ok(format!("已请求取消后台任务 {id}（best-effort，它会在下个检查点收尾）。"))
+            } else {
+                Ok(format!("任务 {id} 不在运行中（可能已完成/已取消/不存在），无需取消。"))
+            }
+        } else {
+            Err("只有主 agent 能取消后台任务".into())
+        }
     } else if call.name == INSTRUCT_TOOL {
         if is_main {
             let id = input["id"].as_str().unwrap_or("").trim();
@@ -779,8 +827,19 @@ fn spawn_team(ctx: &AgentCtx, input: &Value, on_event: &EventSink<'_>) -> Result
         return Err("tasks 数量需在 1~8 之间".into());
     }
 
+    // 全局并发上限：一次性算可用名额（防 TOCTOU），超额只派可用数、其余明确说明不派
+    let available = MAX_CONCURRENT_TEAM.saturating_sub(ctx.team.running_count());
+    if available == 0 {
+        return Err(format!(
+            "已有 {} 个后台任务在跑，达并发上限 {MAX_CONCURRENT_TEAM}，请等部分完成后再派。",
+            ctx.team.running_count()
+        ));
+    }
+    let requested = tasks.len();
+    let dispatch_n = requested.min(available);
+
     let mut lines = Vec::new();
-    for t in tasks {
+    for t in tasks.iter().take(dispatch_n) {
         let title = t["title"].as_str().ok_or("子任务缺少 title")?.to_string();
         let prompt = t["prompt"].as_str().ok_or("子任务缺少 prompt")?.to_string();
         let role_name = t["role"].as_str().filter(|r| !r.is_empty()).map(str::to_string);
@@ -793,8 +852,8 @@ fn spawn_team(ctx: &AgentCtx, input: &Value, on_event: &EventSink<'_>) -> Result
             .as_deref()
             .and_then(|n| crate::agents::resolve(ctx.workspace.as_deref(), n))
             .map(Arc::new);
-        // 后台 agent 无交互审批通道：强制 Auto 模式，否则遇到写操作会永久阻塞在审批等待。
-        // （危险操作仍会触发审批——背景任务里应避免，属 v1 已知限制。）
+        // 后台 agent 无交互审批通道：永远强制 Auto，角色的任何 permission 设置一律忽略，
+        // 否则遇到写操作会永久阻塞在审批等待（危险操作仍会触发审批，背景任务里应避免）。
         let mut child = ctx.child_with_role(role);
         child.mode = AgentMode::Auto;
         // 赋予身份：据此用 report_to_coordinator 向主 agent 汇报
@@ -810,23 +869,33 @@ fn spawn_team(ctx: &AgentCtx, input: &Value, on_event: &EventSink<'_>) -> Result
         tokio::spawn(async move {
             // 后台 agent 的内部事件不进主会话流（避免与主 agent 输出交错）
             let quiet = |_e: AgentEvent| {};
-            let result = loop_impl(
+            // 墙钟兜底超时：超时丢弃 future（只停 agent 编排；已在跑的 shell 命令有自身 timeout）
+            let run = loop_impl(
                 &child,
                 vec![HistoryItem::User(prompt)],
                 &quiet,
                 format!("team-{id_for_task}-"),
                 false,
                 None,
-            )
-            .await;
+            );
+            let result: Result<String, String> = match tokio::time::timeout(TASK_TIMEOUT, run).await {
+                Ok(r) => r,
+                Err(_) => Err(format!("任务超时（>{}s）", TASK_TIMEOUT.as_secs())),
+            };
             // 完成推送（对齐 Claude Code / OpenClaw）：把"任务结束"投进协调者信箱，
             // 主 agent 下一步即可看到，无需主动轮询 team_status 才发现完事。
-            let done_note = match &result {
-                Ok(r) => {
-                    let brief: String = r.chars().take(280).collect();
-                    format!("✅ 任务完成。摘要：{brief}")
+            // 被取消的任务 finish() 会收敛为 Cancelled，故先看 cancel 再定文案。
+            let cancelled = team.is_cancel_requested(&id_for_task);
+            let done_note = if cancelled {
+                "⏹ 任务已取消。".to_string()
+            } else {
+                match &result {
+                    Ok(r) => {
+                        let brief: String = r.chars().take(280).collect();
+                        format!("✅ 任务完成。摘要：{brief}")
+                    }
+                    Err(e) => format!("❌ 任务失败：{e}"),
                 }
-                Err(e) => format!("❌ 任务失败：{e}"),
             };
             team.finish(&id_for_task, result);
             team.post_message(&id_for_task, &title_for_task, &done_note);
@@ -843,9 +912,17 @@ fn spawn_team(ctx: &AgentCtx, input: &Value, on_event: &EventSink<'_>) -> Result
     // 初始看板刷新
     on_event(AgentEvent::TeamUpdate { tasks: ctx.team.snapshot() });
 
+    let overflow = if dispatch_n < requested {
+        format!(
+            "\n\n⚠️ 因并发上限 {MAX_CONCURRENT_TEAM}，本次只派了 {dispatch_n} 个，其余 {} 个未派——可在部分任务完成后重试。",
+            requested - dispatch_n
+        )
+    } else {
+        String::new()
+    };
+
     Ok(format!(
-        "已派发 {} 个后台任务，正在并行执行：\n{}\n\n用 team_status 查询进度与结果（不必马上查，可以先做别的）。",
-        tasks.len(),
+        "已派发 {dispatch_n} 个后台任务，正在并行执行：\n{}{overflow}\n\n用 team_status 查询进度与结果（不必马上查，可以先做别的）。",
         lines.join("\n")
     ))
 }
@@ -872,6 +949,7 @@ fn team_status(ctx: &AgentCtx, input: &Value, on_event: &EventSink<'_>) -> Strin
                 crate::agent::team::TaskStatus::Running => "运行中",
                 crate::agent::team::TaskStatus::Done => "已完成",
                 crate::agent::team::TaskStatus::Failed => "失败",
+                crate::agent::team::TaskStatus::Cancelled => "已取消",
             };
             let role = r.role.as_deref().map(|x| format!(" [{x}]")).unwrap_or_default();
             match &r.result {
@@ -1311,6 +1389,50 @@ mod tests {
             _ => panic!(),
         }
         assert!(ctx.team.drain_inbox().is_empty());
+    }
+
+    /// 功能验证：cancel_agent 标记取消，且后台 child 的 is_cancelled 立即为真
+    #[tokio::test]
+    async fn cancel_agent_marks_and_propagates() {
+        let ctx = offline_ctx();
+        let id = ctx.team.next_id();
+        ctx.team.start(&id, "长任务", None);
+
+        let call = ToolCall {
+            id: "c1".into(),
+            name: "cancel_agent".into(),
+            arguments: format!("{{\"id\":\"{id}\"}}"),
+        };
+        let read_files = Arc::new(std::sync::Mutex::new(std::collections::HashSet::new()));
+        let r = execute_call(&ctx, "", &call, &|_e| {}, None, true, &read_files).await;
+        match r {
+            HistoryItem::ToolResult { is_error, content, .. } => {
+                assert!(!is_error);
+                assert!(content.contains("已请求取消"));
+            }
+            _ => panic!(),
+        }
+        assert!(ctx.team.is_cancel_requested(&id));
+
+        // 后台 child（带该任务身份）应感知取消
+        let mut child = ctx.child_with_role(None);
+        child.team_task = Some(crate::agent::team::TeamTaskHandle { id: id.clone(), title: "长任务".into() });
+        assert!(is_cancelled(&child), "被取消的后台任务 is_cancelled 应为真");
+    }
+
+    /// 功能验证：spawn_team 尊重全局并发上限（满则拒绝；超额只派可用数并说明）
+    #[tokio::test]
+    async fn spawn_team_respects_concurrency_cap() {
+        let ctx = offline_ctx();
+        // 占满并发：手动登记 MAX_CONCURRENT_TEAM 个运行中任务
+        for _ in 0..MAX_CONCURRENT_TEAM {
+            let id = ctx.team.next_id();
+            ctx.team.start(&id, "占位", None);
+        }
+        // 再派应被拒
+        let full = spawn_team(&ctx, &serde_json::json!({"tasks":[{"title":"x","prompt":"y"}]}), &|_e| {});
+        assert!(full.is_err(), "满并发应拒绝");
+        assert!(full.unwrap_err().contains("并发上限"));
     }
 
     /// 功能验证：主 agent 的 instruct_agent 把指令投进运行中任务的信箱；任务不在跑则不投
