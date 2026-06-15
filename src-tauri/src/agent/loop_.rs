@@ -2,7 +2,7 @@
 //! 支持 spawn_subagents：把独立子任务并行派给子 agent（独立上下文，深度限 1 层）。
 
 use std::future::Future;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -436,7 +436,7 @@ async fn loop_body(
             // 注：曾有 dedup_reads（重复读去重）微压缩，但它把早前 read 结果替换成占位符，
             // 反而诱导 weak 模型"以为内容丢了"→ 反复重读同一文件（死循环），已移除。
             if iteration > 0 {
-                let pruned = prune_tool_results(&mut history);
+                let pruned = prune_tool_results(&mut history, ctx.workspace.as_deref());
                 if pruned > 0 && is_main {
                     on_event(AgentEvent::ContextCompacted {
                         note: format!("清理 {pruned} 个超预算的较早结果"),
@@ -1113,30 +1113,52 @@ const TOOL_RESULT_BUDGET_CHARS: usize = 60_000; // 全部结果总预算
 const KEEP_HEAD_RESULTS: usize = 2; // 始终保留最早的几个（项目定位上下文）
 const PRUNED_MARK: &str = "[已清理]";
 
-/// 单个超大结果：保留前后两段，砍掉中间
-fn middle_truncate(s: &str) -> String {
-    let chars: Vec<char> = s.chars().collect();
-    if chars.len() <= SINGLE_RESULT_MAX {
-        return s.to_string();
+/// 把超大工具结果原文落盘到 <workspace>/.codeforge/tool-results/<id>.txt，
+/// 返回相对路径（供 read_file 无损回读，对齐 Claude Code）。无工作区/写失败 → None。
+fn persist_tool_result(workspace: Option<&Path>, id: &str, content: &str) -> Option<String> {
+    let ws = workspace?;
+    let dir = ws.join(".codeforge/tool-results");
+    std::fs::create_dir_all(&dir).ok()?;
+    // 落盘文件不进 git（只忽略 tool-results 目录自身，不影响 .codeforge 下的 MEMORY.md）
+    let gi = dir.join(".gitignore");
+    if !gi.exists() {
+        let _ = std::fs::write(&gi, "*\n");
     }
+    let safe: String = id
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .collect();
+    let path = dir.join(format!("{safe}.txt"));
+    std::fs::write(&path, content).ok()?;
+    Some(format!(".codeforge/tool-results/{safe}.txt"))
+}
+
+/// 单个超大结果：保留前后两段，中间替换为提示；原文若已落盘则提示用 read_file 取回。
+fn truncate_with_ref(s: &str, saved_path: Option<&str>) -> String {
+    let chars: Vec<char> = s.chars().collect();
     let head: String = chars[..SINGLE_RESULT_HEAD].iter().collect();
     let tail: String = chars[chars.len() - SINGLE_RESULT_TAIL..].iter().collect();
     let dropped = chars.len() - SINGLE_RESULT_HEAD - SINGLE_RESULT_TAIL;
-    format!("{head}\n…[中间 {dropped} 字符已省略，需要完整内容请缩小范围重新调用]…\n{tail}")
+    let mid = match saved_path {
+        Some(p) => format!("…[中间 {dropped} 字符已省略；完整原文已存盘，需要时用 read_file 读 {p}]…"),
+        None => format!("…[中间 {dropped} 字符已省略]…"),
+    };
+    format!("{head}\n{mid}\n{tail}")
 }
 
 /// 轮内压缩，两阶段：
-/// ① 单结果中段截断（保留头尾）
-/// ② 总量超预算 → 保留最早 KEEP_HEAD_RESULTS 个 + 最近的若干，中间整轮替换为占位
-/// 返回本次发生压缩的条数。
-fn prune_tool_results(history: &mut [HistoryItem]) -> usize {
+/// ① 单结果中段截断（保留头尾，原文落盘可回读）
+/// ② 总量超预算 → 保留最早 KEEP_HEAD_RESULTS 个 + 最近的若干，中间整条落盘+占位
+/// 返回本次发生压缩的条数。workspace 用于原文落盘（None=纯聊天模式，退回有损截断）。
+fn prune_tool_results(history: &mut [HistoryItem], workspace: Option<&Path>) -> usize {
     let mut pruned = 0usize;
 
-    // 阶段 ①：单结果中段截断
+    // 阶段 ①：单结果中段截断（原文落盘）
     for item in history.iter_mut() {
-        if let HistoryItem::ToolResult { content, .. } = item {
+        if let HistoryItem::ToolResult { content, call_id, .. } = item {
             if !content.starts_with(PRUNED_MARK) && content.chars().count() > SINGLE_RESULT_MAX {
-                *content = middle_truncate(content);
+                let saved = persist_tool_result(workspace, call_id, content);
+                *content = truncate_with_ref(content, saved.as_deref());
                 pruned += 1;
             }
         }
@@ -1159,14 +1181,20 @@ fn prune_tool_results(history: &mut [HistoryItem]) -> usize {
         if protect_head.contains(&i) {
             continue; // 头部始终保留
         }
-        if let HistoryItem::ToolResult { content, name, .. } = &mut history[i] {
+        if let HistoryItem::ToolResult { content, name, call_id, .. } = &mut history[i] {
             let len = content.chars().count();
             if used + len > TOOL_RESULT_BUDGET_CHARS {
-                // 注意：不要写"请重新调用该工具"——那会诱导模型反复重跑（dedup_reads 的翻车教训）。
-                // 只中性告知已省略；模型应基于现有信息继续，确有必要再按需小范围获取。
-                *content = format!(
-                    "{PRUNED_MARK} 较早的 {name} 结果（{len} 字符）已省略以节省上下文；请基于已掌握的信息继续。"
-                );
+                // 原文落盘 + 占位符指向文件（无损可回读，对齐 Claude）；落盘失败才退回纯省略。
+                // 切忌写"请重新调用"——会诱导模型反复重跑（dedup_reads 的翻车教训）。
+                let saved = persist_tool_result(workspace, call_id, content);
+                *content = match saved {
+                    Some(p) => format!(
+                        "{PRUNED_MARK} 较早的 {name} 结果（{len} 字符）已移出上下文以省空间；完整原文已存盘，需要时用 read_file 读 {p}。"
+                    ),
+                    None => format!(
+                        "{PRUNED_MARK} 较早的 {name} 结果（{len} 字符）已省略以节省上下文；请基于已掌握的信息继续。"
+                    ),
+                };
                 pruned += 1;
             } else {
                 used += len;
@@ -1495,7 +1523,7 @@ mod tests {
     fn middle_truncates_oversized_single_result() {
         let big = "a".repeat(SINGLE_RESULT_MAX + 10_000);
         let mut history = vec![tool_result("grep", big)];
-        let pruned = prune_tool_results(&mut history);
+        let pruned = prune_tool_results(&mut history, None);
         assert_eq!(pruned, 1);
         match &history[0] {
             HistoryItem::ToolResult { content, .. } => {
@@ -1504,6 +1532,32 @@ mod tests {
             }
             _ => panic!(),
         }
+    }
+
+    #[test]
+    fn oversized_result_persists_to_workspace_and_points_back() {
+        let ws = tempfile::tempdir().unwrap();
+        let workspace = ws.path().canonicalize().unwrap();
+        let big = "z".repeat(SINGLE_RESULT_MAX + 5_000);
+        let mut history = vec![HistoryItem::ToolResult {
+            call_id: "tc7".into(),
+            name: "bash".into(),
+            content: big.clone(),
+            is_error: false,
+        }];
+        let n = prune_tool_results(&mut history, Some(&workspace));
+        assert_eq!(n, 1);
+        match &history[0] {
+            HistoryItem::ToolResult { content, .. } => {
+                assert!(content.contains(".codeforge/tool-results/tc7.txt"));
+                assert!(content.contains("read_file"));
+            }
+            _ => panic!(),
+        }
+        let saved =
+            std::fs::read_to_string(workspace.join(".codeforge/tool-results/tc7.txt")).unwrap();
+        assert_eq!(saved, big, "落盘的应是完整原文");
+        assert!(workspace.join(".codeforge/tool-results/.gitignore").exists());
     }
 
     #[test]
@@ -1521,7 +1575,7 @@ mod tests {
             tool_result("m5", chunk()),
             tool_result("recent", chunk()),
         ];
-        prune_tool_results(&mut history);
+        prune_tool_results(&mut history, None);
         let kept: Vec<bool> = history
             .iter()
             .filter_map(|i| match i {
@@ -1537,7 +1591,7 @@ mod tests {
         assert!(kept.iter().filter(|k| !**k).count() >= 1, "至少砍掉一个中间");
         // 幂等
         let before = history.len();
-        prune_tool_results(&mut history);
+        prune_tool_results(&mut history, None);
         assert_eq!(history.len(), before);
     }
 
