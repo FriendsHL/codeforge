@@ -199,12 +199,18 @@ fn cheap_model_for(provider: &str) -> &'static str {
 const COMPACT_TRIGGER_CHARS: usize = 100_000;
 const KEEP_RECENT_MESSAGES: usize = 10; // 保留最近 ~5 轮（user+assistant）的原文
 
-const COMPACT_SYSTEM: &str = "你在压缩一段 coding agent 的对话历史，供后续轮次无损接续。严格按下列结构输出，每节用紧凑中文要点；某节无内容写「无」。不要寒暄、不要评论、不要复述本指令。\n\
-## 总体目标\n用户最终想达成什么（一两句），以及明确的约束/偏好（语言、风格、禁止项等）。\n\
-## 当前任务\n此刻正在做的那件事是什么。\n## 任务详情\n该任务的关键细节：涉及的文件路径、函数/类/变量等代码标识符、用到的命令、依赖关系。\n## 任务状态\n已完成的步骤与已验证的结论；当前卡在哪一步或正在等待什么。\n\
-## 已确认的决定\n已敲定、后续不应推翻的方案与取舍。\n\
-## 待办事项\n按顺序列出未完成的步骤与下一步计划。\n\
-## 遗留问题\n已知的坑、报错、不确定点、需要用户确认的事。";
+// 对齐 Claude Code BASE_COMPACT_PROMPT 的 9 段结构。先在脑中按时间线梳理，再严格按 9 节输出。
+const COMPACT_SYSTEM: &str = "你在压缩一段 coding agent 的对话历史，供后续轮次无缝接续。\n\
+只输出文本，绝对不要调用任何工具。先在脑中按时间顺序回顾整段对话（用户意图、技术决策、文件改动、报错处理、用户反馈），然后严格按下面 9 节输出，每节用紧凑中文要点；某节无内容写「无」。不要寒暄、不要复述本指令。\n\n\
+1. 主要请求与意图：用户从最初到现在的核心需求、目标，以及明确的约束/偏好（语言、风格、禁止项等），尽量详尽，别丢用户的真实意图。\n\
+2. 关键技术概念：涉及的技术、框架、库、协议、设计模式等，逐条列。\n\
+3. 文件与代码片段：读过或改过的关键文件——文件名 + 为什么重要 + 做了什么改动 + 必要的关键代码片段（带 文件:行号 更好）。\n\
+4. 报错与修复：出现过的错误、是怎么修的、用户对修复有没有反馈。\n\
+5. 问题解决：已解决的问题，以及正在排查中的思路。\n\
+6. 所有用户消息：逐字列出用户发过的每一条非工具消息（含最新那条）——这是还原意图的关键，一条都别漏。\n\
+7. 待办事项：明确列出尚未完成的任务。\n\
+8. 当前工作：紧接这次摘要之前正在做的那件事，精确到文件名和代码片段。\n\
+9. 下一步（可选）：如果有清晰的下一步，写出来，并附上用户最近输入的原话引用。";
 
 /// 用便宜模型把一段历史摘要成结构化文本（compact_history 与 /compact 共用）
 async fn summarize_messages(
@@ -214,12 +220,24 @@ async fn summarize_messages(
     cancel: &Arc<std::sync::atomic::AtomicBool>,
     old: &[HistoryItem],
 ) -> Result<String, String> {
+    // 工具结果不再整个丢弃——保留截断片段，让摘要能还原"文件与代码片段/报错与修复"两节。
+    let tool_snippet = |content: &str| -> String {
+        const CAP: usize = 800;
+        if content.chars().count() <= CAP {
+            content.to_string()
+        } else {
+            let head: String = content.chars().take(CAP).collect();
+            format!("{head}…[截断]")
+        }
+    };
     let transcript: String = old
         .iter()
         .map(|item| match item {
             HistoryItem::User(t) => format!("用户: {t}"),
             HistoryItem::Assistant { text, .. } => format!("助手: {text}"),
-            HistoryItem::ToolResult { name, .. } => format!("(工具 {name} 的结果，略)"),
+            HistoryItem::ToolResult { name, content, .. } => {
+                format!("(工具 {name} 结果) {}", tool_snippet(content))
+            }
         })
         .collect::<Vec<_>>()
         .join("\n\n");
@@ -265,8 +283,11 @@ async fn compact_history(
     match result.map(Ok::<_, String>) {
         Ok(Ok(summary)) => {
             let summary_chars = summary.chars().count();
+            // 对齐 Claude 的延续包装：明确这是上下文超限后的续接，直接接着干、别复述摘要。
             let mut compacted = vec![HistoryItem::User(format!(
-                "[早前对话的自动摘要，原文已压缩；最近 {KEEP_RECENT_MESSAGES} 条消息保留在后面]\n{summary}"
+                "本会话因上下文超限，从上一段对话延续。下面是早前对话的结构化摘要（原文已压缩，最近 {KEEP_RECENT_MESSAGES} 条消息保留在后面原文）。\n\n\
+{summary}\n\n\
+请直接从中断处继续：不要向用户复述摘要、不要寒暄、不要说「我继续」之类，就当没中断过一样接着完成手上的任务。",
             ))];
             compacted.extend_from_slice(&history[split..]);
             return (
