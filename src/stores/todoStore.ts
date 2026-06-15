@@ -2,6 +2,7 @@ import { create } from "zustand";
 
 export interface TodoItem {
   content: string;
+  activeForm?: string;
   status: "pending" | "in_progress" | "completed";
 }
 

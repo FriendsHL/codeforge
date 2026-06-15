@@ -36,7 +36,9 @@ export function TodoPanel() {
               ) : (
                 <ClockCircleOutlined style={{ color: "#bbb" }} />
               )}
-              <span>{t.content}</span>
+              <span>
+                {t.status === "in_progress" && t.activeForm ? t.activeForm : t.content}
+              </span>
             </div>
           ))}
         </div>

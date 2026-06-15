@@ -77,13 +77,21 @@ impl Tool for GrepTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "grep".into(),
-            description: "在工作区内按正则表达式搜索文件内容，返回 路径:行号:匹配行。可用 path 限定子目录、include 过滤文件名。".into(),
+            description: "在工作区内按正则搜索文件内容，遵循 .gitignore。\
+output_mode 控制返回形态：content=路径:行号:匹配行（默认）；files_with_matches=只列命中的文件路径；count=每个文件命中数。\
+可用 path 限定子目录、glob 过滤文件名（如 *.rs）、-i 忽略大小写。".into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
                     "pattern": {"type": "string", "description": "正则表达式"},
                     "path": {"type": "string", "description": "限定搜索的子目录（可选）"},
-                    "include": {"type": "string", "description": "文件名 glob 过滤，如 *.java（可选）"}
+                    "glob": {"type": "string", "description": "文件名 glob 过滤，如 *.rs、*.{ts,tsx}（可选）"},
+                    "output_mode": {
+                        "type": "string",
+                        "enum": ["content", "files_with_matches", "count"],
+                        "description": "content=匹配行（默认）/ files_with_matches=只列文件 / count=每文件命中数"
+                    },
+                    "-i": {"type": "boolean", "description": "忽略大小写（可选）"}
                 },
                 "required": ["pattern"]
             }),
@@ -92,28 +100,37 @@ impl Tool for GrepTool {
 
     fn run(&self, workspace: &Path, input: &Value) -> Result<String, String> {
         let pattern = input["pattern"].as_str().ok_or("缺少 pattern 参数")?;
-        let regex = regex::Regex::new(pattern).map_err(|e| format!("正则无效: {e}"))?;
+        let case_insensitive = input["-i"]
+            .as_bool()
+            .or_else(|| input["case_insensitive"].as_bool())
+            .unwrap_or(false);
+        let regex = regex::RegexBuilder::new(pattern)
+            .case_insensitive(case_insensitive)
+            .build()
+            .map_err(|e| format!("正则无效: {e}"))?;
+        let output_mode = input["output_mode"].as_str().unwrap_or("content");
 
         let root = match input["path"].as_str() {
             Some(rel) => resolve_in_workspace(workspace, rel)?,
             None => workspace.to_path_buf(),
         };
-        let include = match input["include"].as_str() {
+        // glob（Claude 命名）兼容旧的 include
+        let glob_src = input["glob"].as_str().or_else(|| input["include"].as_str());
+        let include = match glob_src {
             Some(g) => Some(
                 globset::GlobBuilder::new(g)
                     .build()
-                    .map_err(|e| format!("include 模式无效: {e}"))?
+                    .map_err(|e| format!("glob 模式无效: {e}"))?
                     .compile_matcher(),
             ),
             None => None,
         };
 
-        let mut matches = Vec::new();
+        let mut lines_out: Vec<String> = Vec::new(); // content 模式
+        let mut files_out: Vec<String> = Vec::new(); // files_with_matches
+        let mut counts_out: Vec<String> = Vec::new(); // count
         let mut truncated = false;
-        let walker = ignore::WalkBuilder::new(&root)
-            .hidden(true)
-            .git_ignore(true)
-            .build();
+        let walker = ignore::WalkBuilder::new(&root).hidden(true).git_ignore(true).build();
         'outer: for entry in walker.flatten() {
             if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
                 continue;
@@ -135,29 +152,50 @@ impl Tool for GrepTool {
                 .unwrap_or(entry.path())
                 .to_string_lossy()
                 .to_string();
+
+            let mut file_count = 0usize;
             for (line_no, line) in content.lines().enumerate() {
                 if regex.is_match(line) {
-                    let shown: String = if line.chars().count() > MAX_MATCH_LINE_CHARS {
-                        line.chars().take(MAX_MATCH_LINE_CHARS).collect::<String>() + "…"
-                    } else {
-                        line.to_string()
-                    };
-                    matches.push(format!("{rel}:{}:{}", line_no + 1, shown.trim_end()));
-                    if matches.len() >= MAX_GREP_MATCHES {
-                        truncated = true;
-                        break 'outer;
+                    file_count += 1;
+                    if output_mode == "content" {
+                        let shown: String = if line.chars().count() > MAX_MATCH_LINE_CHARS {
+                            line.chars().take(MAX_MATCH_LINE_CHARS).collect::<String>() + "…"
+                        } else {
+                            line.to_string()
+                        };
+                        lines_out.push(format!("{rel}:{}:{}", line_no + 1, shown.trim_end()));
+                        if lines_out.len() >= MAX_GREP_MATCHES {
+                            truncated = true;
+                            break 'outer;
+                        }
                     }
+                }
+            }
+            if file_count > 0 && output_mode != "content" {
+                if output_mode == "count" {
+                    counts_out.push(format!("{rel}:{file_count}"));
+                } else {
+                    files_out.push(rel);
+                }
+                if files_out.len() >= MAX_GREP_MATCHES || counts_out.len() >= MAX_GREP_MATCHES {
+                    truncated = true;
+                    break;
                 }
             }
         }
 
-        if matches.is_empty() {
+        let mut out = match output_mode {
+            "files_with_matches" => files_out,
+            "count" => counts_out,
+            _ => lines_out,
+        };
+        if out.is_empty() {
             return Ok(format!("没有匹配 {pattern} 的内容"));
         }
         if truncated {
-            matches.push(format!("…[truncated: 超过 {MAX_GREP_MATCHES} 条匹配，建议缩小范围]"));
+            out.push(format!("…[truncated: 超过 {MAX_GREP_MATCHES} 条，建议缩小范围或加 glob/path]"));
         }
-        Ok(matches.join("\n"))
+        Ok(out.join("\n"))
     }
 }
 
@@ -197,10 +235,43 @@ mod tests {
     fn grep_respects_include_filter() {
         let dir = workspace();
         let ws = dir.path().canonicalize().unwrap();
+        // glob（新名）与 include（旧名）都应生效
         let out = GrepTool
-            .run(&ws, &json!({"pattern": "helper", "include": "*.md"}))
+            .run(&ws, &json!({"pattern": "helper", "glob": "*.md"}))
             .unwrap();
         assert!(out.contains("notes.md"));
         assert!(!out.contains("helper.rs"));
+    }
+
+    #[test]
+    fn grep_files_with_matches_mode() {
+        let dir = workspace();
+        let ws = dir.path().canonicalize().unwrap();
+        let out = GrepTool
+            .run(&ws, &json!({"pattern": "helper", "output_mode": "files_with_matches"}))
+            .unwrap();
+        // 只列文件路径，不含 行号:内容
+        assert!(out.contains("helper.rs"));
+        assert!(!out.contains(":1:"));
+    }
+
+    #[test]
+    fn grep_count_mode() {
+        let dir = workspace();
+        let ws = dir.path().canonicalize().unwrap();
+        let out = GrepTool
+            .run(&ws, &json!({"pattern": "helper", "output_mode": "count"}))
+            .unwrap();
+        assert!(out.contains("helper.rs:1") || out.contains("notes.md:1"));
+    }
+
+    #[test]
+    fn grep_case_insensitive() {
+        let dir = workspace();
+        let ws = dir.path().canonicalize().unwrap();
+        // 大写 HELPER 默认搜不到，加 -i 才能命中
+        assert!(GrepTool.run(&ws, &json!({"pattern": "HELPER"})).unwrap().contains("没有匹配"));
+        let out = GrepTool.run(&ws, &json!({"pattern": "HELPER", "-i": true})).unwrap();
+        assert!(out.contains("helper"));
     }
 }
