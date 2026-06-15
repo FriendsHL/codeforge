@@ -25,6 +25,13 @@ const TOOL_LABELS: Record<string, string> = {
   web_search: "搜索",
   research_plan: "调研方法",
   spawn_subagents: "子agent团队",
+  spawn_team: "派发团队",
+  team_status: "查团队进度",
+  instruct_agent: "指令子agent",
+  cancel_agent: "取消子agent",
+  list_agents: "可用角色",
+  save_agent: "保存角色",
+  delete_agent: "删除角色",
   browser_open: "打开浏览器",
   todo_write: "更新任务清单",
   remember: "记住",
@@ -55,10 +62,25 @@ function summarizeInput(name: string, input: unknown): string {
       return String(obj.query ?? "");
     case "research_plan":
       return String(obj.question ?? "");
-    case "spawn_subagents": {
-      const tasks = obj.tasks as { title?: string }[] | undefined;
-      return (tasks ?? []).map((t) => t.title).filter(Boolean).join(" | ");
+    case "spawn_subagents":
+    case "spawn_team": {
+      const tasks = obj.tasks as { title?: string; role?: string }[] | undefined;
+      return (tasks ?? [])
+        .map((t) => (t.role ? `${t.title} [${t.role}]` : t.title))
+        .filter(Boolean)
+        .join(" · ");
     }
+    case "team_status": {
+      const ids = obj.ids as string[] | undefined;
+      return ids && ids.length ? ids.join(", ") : "全部";
+    }
+    case "instruct_agent":
+      return `→ ${obj.id ?? ""}: ${obj.content ?? ""}`;
+    case "cancel_agent":
+      return String(obj.id ?? "");
+    case "save_agent":
+    case "delete_agent":
+      return String(obj.name ?? "");
     case "remember":
       return String(obj.content ?? "");
     case "git_status":
