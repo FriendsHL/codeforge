@@ -576,7 +576,14 @@ async fn loop_body(
             }
         }
 
-        Err(format!("达到最大迭代次数（{max_iter}），任务可能过于复杂，请拆小后重试"))
+        // 达到迭代上限：不当作硬失败（否则会触发上层重试风暴），而是把已有产出 + 提示返回。
+        // 子 agent 由此交回阶段性结论而非"执行失败"，主 agent 也能拿到部分结果继续。
+        let note = format!("\n\n[已达迭代上限（{max_iter}）：以上为目前的阶段性结论，可能未完全收尾。]");
+        if final_text.trim().is_empty() {
+            Ok(format!("（达到迭代上限 {max_iter}，未产出明确结论；任务可能过大，建议缩小范围）"))
+        } else {
+            Ok(format!("{}{note}", final_text.trim_end()))
+        }
     }
 }
 

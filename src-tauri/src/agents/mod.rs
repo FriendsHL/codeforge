@@ -196,7 +196,7 @@ pub fn delete_role(scope: &str, workspace: Option<&Path>, name: &str) -> Result<
 /// 首次运行把内置角色落成真实文件到 ~/.codeforge/agents，之后用户删/改不再覆盖。
 /// 用 .seeded 哨兵记录已播种，尊重用户后续的删除。
 /// 内置角色版本：每次改了 builtin/*.md 内容就 +1，触发对内置角色文件的重新同步。
-const BUILTIN_VERSION: &str = "2";
+const BUILTIN_VERSION: &str = "3";
 
 pub fn seed_builtins() {
     let Some(dir) = global_agents_dir() else { return };
