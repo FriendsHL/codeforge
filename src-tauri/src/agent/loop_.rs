@@ -1162,8 +1162,11 @@ fn prune_tool_results(history: &mut [HistoryItem]) -> usize {
         if let HistoryItem::ToolResult { content, name, .. } = &mut history[i] {
             let len = content.chars().count();
             if used + len > TOOL_RESULT_BUDGET_CHARS {
-                *content =
-                    format!("{PRUNED_MARK} 中间步骤 {name} 的结果（{len} 字符）已省略；如仍需要请重新调用该工具");
+                // 注意：不要写"请重新调用该工具"——那会诱导模型反复重跑（dedup_reads 的翻车教训）。
+                // 只中性告知已省略；模型应基于现有信息继续，确有必要再按需小范围获取。
+                *content = format!(
+                    "{PRUNED_MARK} 较早的 {name} 结果（{len} 字符）已省略以节省上下文；请基于已掌握的信息继续。"
+                );
                 pruned += 1;
             } else {
                 used += len;
