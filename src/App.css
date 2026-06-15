@@ -2,6 +2,34 @@
   box-sizing: border-box;
 }
 
+/* ===== Codex/OpenAI 风设计 token（单色极简）===== */
+:root {
+  --cf-bg: #f7f7f8;          /* app 底 */
+  --cf-surface: #ffffff;     /* 面板 */
+  --cf-subtle: #f2f2f4;      /* 次级填充/选中底 */
+  --cf-text: #0d0d0d;        /* 主文字 */
+  --cf-text-secondary: #565869;
+  --cf-text-dim: #9395a3;
+  --cf-border: #e7e7ea;      /* 细边框 */
+  --cf-border-strong: #d6d6db;
+  --cf-accent: #0d0d0d;      /* 主操作/激活：近黑 */
+  --cf-accent-contrast: #ffffff;
+  --cf-radius: 8px;
+}
+
+[data-theme="dark"] {
+  --cf-bg: #141414;
+  --cf-surface: #1c1c1e;
+  --cf-subtle: #242427;
+  --cf-text: #ececec;
+  --cf-text-secondary: #b4b4b8;
+  --cf-text-dim: #88888f;
+  --cf-border: #2c2c30;
+  --cf-border-strong: #3a3a40;
+  --cf-accent: #ececec;      /* 暗色下主操作近白 */
+  --cf-accent-contrast: #141414;
+}
+
 html,
 body,
 #root {
@@ -10,22 +38,15 @@ body,
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue",
-    sans-serif;
-  background: #fafafa;
-}
-
-/* ===== 深色模式：追加覆盖，不动浅色规则 ===== */
-[data-theme="dark"] {
-  --cf-surface: #1f1f1f;
-  --cf-subtle: #262626;
-  --cf-border: #303030;
-  --cf-text: #e6e6e6;
-  --cf-text-dim: #9a9a9a;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC",
+    "Helvetica Neue", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  background: var(--cf-bg);
+  color: var(--cf-text);
 }
 
 [data-theme="dark"] body {
-  background: #141414;
+  background: var(--cf-bg);
   color: var(--cf-text);
 }
 
@@ -87,7 +108,7 @@ body {
 }
 [data-theme="dark"] .session-item-active,
 [data-theme="dark"] .project-header-active {
-  background: #3a2a14;
+  background: var(--cf-subtle);
 }
 
 [data-theme="dark"] .chat-notice,
@@ -125,7 +146,7 @@ body {
 
 [data-theme="dark"] .viewer-tab.active {
   background: var(--cf-surface);
-  color: #4493f8;
+  color: var(--cf-accent);
 }
 
 [data-theme="dark"] .viewer-tab:hover {
@@ -156,8 +177,8 @@ body {
   align-items: center;
   gap: 12px;
   padding: 10px 16px;
-  background: #fff;
-  border-bottom: 1px solid #f0f0f0;
+  background: var(--cf-surface);
+  border-bottom: 1px solid var(--cf-border);
 }
 
 .app-title {
@@ -179,7 +200,7 @@ body {
   width: 100%;
   display: flex;
   flex-direction: column;
-  background: #fff;
+  background: var(--cf-surface);
 }
 
 /* 视觉上是 1px 边线，命中区域 7px（负 margin 扩展），不产生"间隔"感 */
@@ -207,7 +228,7 @@ body {
 .resize-handle:hover::after {
   left: 2px;
   width: 3px;
-  background: #d46b08;
+  background: var(--cf-accent);
 }
 
 /* 拖拽期间禁掉 iframe 的鼠标事件，否则 mousemove 会被 iframe 吞掉 */
@@ -224,7 +245,7 @@ body.resizing {
   display: flex;
   gap: 6px;
   padding: 8px;
-  border-bottom: 1px solid #f5f5f5;
+  border-bottom: 1px solid var(--cf-border);
 }
 
 .projects-actions .ant-btn {
@@ -253,12 +274,12 @@ body.resizing {
 }
 
 .project-header:hover {
-  background: #fafafa;
+  background: var(--cf-subtle);
 }
 
 .project-header-active {
-  background: #fff7e6;
-  color: #d46b08;
+  background: var(--cf-subtle);
+  color: var(--cf-accent);
 }
 
 .project-header-loose {
@@ -282,16 +303,16 @@ body.resizing {
   width: 100%;
   display: flex;
   flex-direction: column;
-  background: #fff;
-  border-left: 1px solid #e5e5e5;
-  border-right: 1px solid #e5e5e5;
+  background: var(--cf-surface);
+  border-left: 1px solid var(--cf-border);
+  border-right: 1px solid var(--cf-border);
 }
 
 .viewer-tabs {
   display: flex;
   align-items: stretch;
-  background: #fafafa;
-  border-bottom: 1px solid #e8e8e8;
+  background: var(--cf-subtle);
+  border-bottom: 1px solid var(--cf-border);
   overflow-x: auto;
 }
 
@@ -303,7 +324,7 @@ body.resizing {
   font-size: 12px;
   color: #666;
   cursor: pointer;
-  border-right: 1px solid #ececec;
+  border-right: 1px solid var(--cf-border);
   border-bottom: 2px solid transparent;
   white-space: nowrap;
   max-width: 180px;
@@ -314,9 +335,9 @@ body.resizing {
 }
 
 .viewer-tab.active {
-  color: #1677ff;
-  background: #fff;
-  border-bottom-color: #1677ff;
+  color: var(--cf-accent);
+  background: var(--cf-surface);
+  border-bottom-color: var(--cf-accent);
   font-weight: 600;
 }
 
@@ -364,7 +385,7 @@ body.resizing {
   display: flex;
   gap: 6px;
   padding: 6px 8px;
-  border-bottom: 1px solid #f5f5f5;
+  border-bottom: 1px solid var(--cf-border);
 }
 
 .browser-frame {
@@ -377,7 +398,7 @@ body.resizing {
   font-size: 11px;
   color: #bbb;
   padding: 3px 8px;
-  border-top: 1px solid #f5f5f5;
+  border-top: 1px solid var(--cf-border);
 }
 
 .md-rendered {
@@ -399,7 +420,7 @@ body.resizing {
 
 .md-rendered th,
 .md-rendered td {
-  border: 1px solid #e8e8e8;
+  border: 1px solid var(--cf-border);
   padding: 5px 10px;
 }
 
@@ -416,7 +437,7 @@ body.resizing {
   display: flex;
   flex-direction: column;
   overflow-y: auto;
-  background: #fff;
+  background: var(--cf-surface);
   padding: 8px 4px;
 }
 
@@ -447,7 +468,7 @@ body.resizing {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #d46b08;
+  background: var(--cf-accent);
   margin-left: 6px;
   vertical-align: middle;
 }
@@ -473,7 +494,7 @@ body.resizing {
 }
 
 .changes-item:hover {
-  background: #fafafa;
+  background: var(--cf-subtle);
 }
 
 .changes-item .git-badge {
@@ -504,11 +525,11 @@ body.resizing {
 }
 
 .session-item:hover {
-  background: #fafafa;
+  background: var(--cf-subtle);
 }
 
 .session-item-active {
-  background: #fff7e6;
+  background: var(--cf-subtle);
 }
 
 .session-item-main {
@@ -536,7 +557,7 @@ body.resizing {
   font-size: 11px;
   color: #999;
   padding: 3px 16px 0;
-  background: #fff;
+  background: var(--cf-surface);
 }
 
 .chat-status-ctx {
@@ -624,9 +645,9 @@ body.resizing {
 .approval-card {
   align-self: stretch;
   max-width: 90%;
-  border: 1px solid #ffd591;
+  border: 1px solid var(--cf-border);
   border-radius: 10px;
-  background: #fffbf5;
+  background: var(--cf-subtle);
   padding: 10px 12px;
 }
 
@@ -640,7 +661,7 @@ body.resizing {
 
 .approval-card .diff-view {
   max-height: 320px;
-  background: #fff;
+  background: var(--cf-surface);
 }
 
 .approval-actions {
@@ -650,7 +671,7 @@ body.resizing {
 .diff-view {
   max-height: 70vh;
   overflow: auto;
-  border: 1px solid #f0f0f0;
+  border: 1px solid var(--cf-border);
   border-radius: 8px;
   font-family: "SF Mono", Menlo, Consolas, monospace;
   font-size: 12.5px;
@@ -668,7 +689,7 @@ body.resizing {
   text-align: right;
   color: #bbb;
   user-select: none;
-  background: #fafafa;
+  background: var(--cf-subtle);
   flex-shrink: 0;
 }
 
@@ -705,7 +726,7 @@ body.resizing {
 
 .diff-hunk-row {
   background: #f0f5ff;
-  color: #1677ff;
+  color: var(--cf-accent);
   padding: 2px 0;
 }
 
@@ -722,7 +743,7 @@ body.resizing {
 .tool-card {
   align-self: stretch;
   max-width: 76%;
-  background: #fffbf5;
+  background: var(--cf-subtle);
 }
 
 .tool-card-label {
@@ -747,7 +768,7 @@ body.resizing {
 }
 
 .tool-card-revert {
-  color: #d46b08;
+  color: var(--cf-accent);
   font-size: 12px;
   padding: 0 6px;
 }
@@ -789,15 +810,15 @@ body.resizing {
 
 .chat-bubble-user {
   align-self: flex-end;
-  background: #d46b08;
-  color: #fff;
+  background: var(--cf-accent);
+  color: var(--cf-accent-contrast);
   border-bottom-right-radius: 4px;
 }
 
 .chat-bubble-assistant {
   align-self: flex-start;
-  background: #fff;
-  border: 1px solid #f0f0f0;
+  background: var(--cf-surface);
+  border: 1px solid var(--cf-border);
   border-bottom-left-radius: 4px;
   white-space: normal;
 }
@@ -812,14 +833,14 @@ body.resizing {
 
 .thinking-card {
   margin-bottom: 8px;
-  border: 1px solid #f0f0f0;
+  border: 1px solid var(--cf-border);
   border-radius: 8px;
   background: #fcfcfc;
   font-size: 12px;
 }
 
 .thinking-live {
-  border-color: #ffd591;
+  border-color: var(--cf-border);
 }
 
 .thinking-header {
@@ -849,7 +870,7 @@ body.resizing {
 .subagent-group {
   align-self: stretch;
   max-width: 90%;
-  border: 1px solid #e8e8e8;
+  border: 1px solid var(--cf-border);
   border-radius: 10px;
   background: #fbfbfb;
   padding: 6px 10px;
@@ -888,17 +909,17 @@ body.resizing {
 
 .todo-panel {
   margin: 4px 16px 0;
-  border: 1px solid #ffe7ba;
+  border: 1px solid var(--cf-border);
   border-radius: 8px;
-  background: #fffdf8;
+  background: var(--cf-surface);
   font-size: 12.5px;
 }
 
 .team-panel {
   margin: 4px 16px 0;
-  border: 1px solid #bae0ff;
+  border: 1px solid var(--cf-border);
   border-radius: 8px;
-  background: #f5fbff;
+  background: var(--cf-surface);
   font-size: 12.5px;
 }
 
@@ -910,7 +931,7 @@ body.resizing {
   cursor: pointer;
   user-select: none;
   font-weight: 600;
-  color: #0958d9;
+  color: var(--cf-accent);
 }
 
 .team-progress {
@@ -937,14 +958,14 @@ body.resizing {
 }
 
 .team-item-result {
-  color: #1677ff;
+  color: var(--cf-accent);
   cursor: help;
   margin-left: auto;
 }
 
 [data-theme="dark"] .team-panel {
-  background: #11212e;
-  border-color: #15395b;
+  background: var(--cf-subtle);
+  border-color: var(--cf-border);
 }
 
 .todo-header {
@@ -955,7 +976,7 @@ body.resizing {
   cursor: pointer;
   user-select: none;
   font-weight: 600;
-  color: #d46b08;
+  color: var(--cf-accent);
 }
 
 .todo-progress {
@@ -995,7 +1016,7 @@ body.resizing {
   align-self: center;
   color: #aaa;
   font-size: 12px;
-  background: #fafafa;
+  background: var(--cf-subtle);
   border-radius: 10px;
   padding: 3px 14px;
 }
@@ -1018,7 +1039,7 @@ body.resizing {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: #d46b08;
+  background: var(--cf-accent);
   animation: working-bounce 1.2s infinite ease-in-out;
 }
 
@@ -1066,7 +1087,7 @@ body.resizing {
 .chat-bubble-assistant th,
 .chat-bubble-assistant td {
   border: none;
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid var(--cf-border);
   padding: 6px 14px 6px 0;
   text-align: left;
   vertical-align: top;
@@ -1077,7 +1098,7 @@ body.resizing {
   color: #888;
   font-weight: 600;
   font-size: 12px;
-  border-bottom: 2px solid #e8e8e8;
+  border-bottom: 2px solid var(--cf-border);
   white-space: nowrap;
 }
 
@@ -1086,7 +1107,7 @@ body.resizing {
   align-items: center;
   gap: 10px;
   padding: 6px 16px 0;
-  background: #fff;
+  background: var(--cf-surface);
 }
 
 .chat-mode-hint {
@@ -1099,7 +1120,7 @@ body.resizing {
   align-items: flex-end;
   gap: 8px;
   padding: 10px 16px 12px;
-  background: #fff;
+  background: var(--cf-surface);
   border-top: none;
 }
 
@@ -1134,7 +1155,7 @@ body.resizing {
 
 .mention-chips {
   padding: 6px 16px 0;
-  background: #fff;
+  background: var(--cf-surface);
 }
 
 .mention-picker {
@@ -1144,8 +1165,8 @@ body.resizing {
   right: 0;
   max-height: 240px;
   overflow-y: auto;
-  background: #fff;
-  border: 1px solid #e8e8e8;
+  background: var(--cf-surface);
+  border: 1px solid var(--cf-border);
   border-radius: 8px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
   z-index: 20;
@@ -1163,7 +1184,7 @@ body.resizing {
 }
 
 .mention-active {
-  background: #fff7e6;
+  background: var(--cf-subtle);
 }
 
 .mention-name {

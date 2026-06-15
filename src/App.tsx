@@ -83,7 +83,15 @@ function App() {
   return (
     <ConfigProvider
       theme={{
-        token: { colorPrimary: "#d46b08" },
+        token: {
+          // Codex/OpenAI 风：单色近黑主操作（暗色下近白），克制无暖色
+          colorPrimary: mode === "dark" ? "#ececec" : "#0d0d0d",
+          colorTextLightSolid: mode === "dark" ? "#141414" : "#ffffff",
+          colorInfo: mode === "dark" ? "#ececec" : "#0d0d0d",
+          borderRadius: 8,
+          fontFamily:
+            '-apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Helvetica Neue", sans-serif',
+        },
         algorithm: mode === "dark" ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
       }}
     >
