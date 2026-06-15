@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Alert, App, Button, Empty, Input, Segmented, Select, Tag, Tooltip } from "antd";
-import { ClearOutlined, SendOutlined, StopOutlined } from "@ant-design/icons";
+import { ArrowUpOutlined, ClearOutlined, StopOutlined } from "@ant-design/icons";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { listAgentRoles, stopGeneration, type AgentRoleMeta } from "../../lib/ipc";
@@ -350,21 +350,21 @@ export function ChatView() {
         </div>
         <ContextRing model={model} contextTokens={contextTokens} />
         <Tooltip title="清空会话">
-          <Button icon={<ClearOutlined />} onClick={clear} disabled={streaming} />
+          <Button type="text" shape="circle" icon={<ClearOutlined />} onClick={clear} disabled={streaming} />
         </Tooltip>
         {streaming ? (
           <>
             <Tooltip title="追加到当前对话">
-              <Button icon={<SendOutlined />} onClick={submit} />
+              <Button shape="circle" icon={<ArrowUpOutlined />} onClick={submit} />
             </Tooltip>
-            <Button danger type="primary" icon={<StopOutlined />} onClick={stop}>
-              停止
-            </Button>
+            <Tooltip title="停止">
+              <Button danger type="primary" shape="circle" icon={<StopOutlined />} onClick={stop} />
+            </Tooltip>
           </>
         ) : (
-          <Button type="primary" icon={<SendOutlined />} onClick={submit}>
-            发送
-          </Button>
+          <Tooltip title="发送（Enter）">
+            <Button type="primary" shape="circle" icon={<ArrowUpOutlined />} onClick={submit} />
+          </Tooltip>
         )}
       </div>
     </div>

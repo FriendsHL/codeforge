@@ -13,6 +13,12 @@ import { useChatStore } from "../../stores/chatStore";
 import { useSessionStore } from "../../stores/sessionStore";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
 
+/** "2026-06-13 23:57:18" → "06-13 23:57"（去年份与秒，更轻） */
+function shortTime(s: string): string {
+  const m = /\d{4}-(\d{2}-\d{2})[ T](\d{2}:\d{2})/.exec(s);
+  return m ? `${m[1]} ${m[2]}` : s;
+}
+
 function SessionRow({
   session,
   onRename,
@@ -42,7 +48,7 @@ function SessionRow({
     >
       <div className="session-item-main">
         <div className="session-title">{session.title}</div>
-        <div className="session-time">{session.updatedAt}</div>
+        <div className="session-time">{shortTime(session.updatedAt)}</div>
       </div>
       <Dropdown
         trigger={["click"]}
@@ -94,11 +100,11 @@ export function ProjectsPanel() {
   return (
     <aside className="projects-panel">
       <div className="projects-actions">
-        <Button size="small" icon={<FolderOpenOutlined />} onClick={() => void openWorkspace()}>
+        <Button type="text" size="small" icon={<FolderOpenOutlined />} onClick={() => void openWorkspace()}>
           打开项目
         </Button>
         <Tooltip title="在当前项目下开新会话">
-          <Button size="small" icon={<PlusOutlined />} onClick={startNew} disabled={streaming}>
+          <Button type="text" size="small" icon={<PlusOutlined />} onClick={startNew} disabled={streaming}>
             新会话
           </Button>
         </Tooltip>

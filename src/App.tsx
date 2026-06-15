@@ -97,12 +97,16 @@ function App() {
     >
       <AntdApp>
         <div className="app-layout">
-          <header className="app-header">
-            <span className="app-title">⚒️ CodeForge</span>
-            <Tag color="orange">{model}</Tag>
-            {name && <Tag icon={<FolderOpenOutlined />}>{name}</Tag>}
+          <header className="app-header" data-tauri-drag-region>
+            <span className="app-title">CodeForge</span>
+            <Tag bordered={false} className="header-pill">{model}</Tag>
+            {name && (
+              <Tag bordered={false} className="header-pill" icon={<FolderOpenOutlined />}>
+                {name}
+              </Tag>
+            )}
             {branch && (
-              <Tag icon={<BranchesOutlined />} color="geekblue">
+              <Tag bordered={false} className="header-pill" icon={<BranchesOutlined />}>
                 {branch}
               </Tag>
             )}

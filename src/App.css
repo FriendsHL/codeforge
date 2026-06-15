@@ -175,15 +175,31 @@ body {
 .app-header {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 10px 16px;
-  background: var(--cf-surface);
+  gap: 8px;
+  /* 左侧让位 macOS 红绿灯（titleBarStyle: Overlay） */
+  padding: 8px 14px 8px 84px;
+  background: var(--cf-bg);
   border-bottom: 1px solid var(--cf-border);
 }
 
 .app-title {
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+/* 头部信息 pill：中性、低存在感 */
+.header-pill {
+  background: var(--cf-subtle) !important;
+  color: var(--cf-text-secondary) !important;
+  font-size: 12px;
+  border-radius: 6px;
+}
+
+/* 头部按钮/标签不拦截窗口拖拽 */
+.app-header .ant-btn,
+.app-header .ant-tag {
+  -webkit-app-region: no-drag;
 }
 
 .app-header-spacer {
@@ -241,11 +257,19 @@ body.resizing {
   user-select: none;
 }
 
+.projects-panel {
+  background: var(--cf-bg);
+}
+
 .projects-actions {
   display: flex;
-  gap: 6px;
-  padding: 8px;
-  border-bottom: 1px solid var(--cf-border);
+  gap: 4px;
+  padding: 8px 8px 4px;
+}
+
+.projects-actions .ant-btn {
+  justify-content: flex-start;
+  color: var(--cf-text-secondary);
 }
 
 .projects-actions .ant-btn {
@@ -539,14 +563,31 @@ body.resizing {
 
 .session-title {
   font-size: 13px;
+  color: var(--cf-text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+/* 时间戳极弱：默认隐藏，悬停/选中才露出，保持侧栏清爽（Codex 气质） */
 .session-time {
-  font-size: 11px;
-  color: #aaa;
+  font-size: 10.5px;
+  color: var(--cf-text-dim);
+  opacity: 0;
+  transition: opacity 0.12s;
+  margin-top: 1px;
+}
+.session-item:hover .session-time,
+.session-item-active .session-time {
+  opacity: 1;
+}
+/* 菜单按钮默认隐藏，悬停露出 */
+.session-item .ant-btn {
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.session-item:hover .ant-btn {
+  opacity: 0.55;
 }
 
 .chat-status {
@@ -800,10 +841,10 @@ body.resizing {
 }
 
 .chat-bubble {
-  max-width: 76%;
+  max-width: 80%;
   padding: 10px 14px;
-  border-radius: 12px;
-  line-height: 1.6;
+  border-radius: 14px;
+  line-height: 1.65;
   word-break: break-word;
   white-space: pre-wrap;
 }
@@ -812,14 +853,16 @@ body.resizing {
   align-self: flex-end;
   background: var(--cf-accent);
   color: var(--cf-accent-contrast);
-  border-bottom-right-radius: 4px;
+  border-bottom-right-radius: 5px;
 }
 
+/* 助手消息：无边框、透明底，纯文字（Codex 气质，更轻） */
 .chat-bubble-assistant {
-  align-self: flex-start;
-  background: var(--cf-surface);
-  border: 1px solid var(--cf-border);
-  border-bottom-left-radius: 4px;
+  align-self: stretch;
+  max-width: 100%;
+  background: transparent;
+  border: none;
+  padding: 2px 0;
   white-space: normal;
 }
 
@@ -1106,8 +1149,8 @@ body.resizing {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 6px 16px 0;
-  background: var(--cf-surface);
+  padding: 6px 22px 2px;
+  background: transparent;
 }
 
 .chat-mode-hint {
@@ -1115,13 +1158,17 @@ body.resizing {
   color: #999;
 }
 
+/* 输入区做成漂浮圆角卡片（Codex 气质）：文本框无边框内嵌，按钮圆形 */
 .chat-input {
   display: flex;
   align-items: flex-end;
-  gap: 8px;
-  padding: 10px 16px 12px;
+  gap: 4px;
+  margin: 6px 16px 14px;
+  padding: 6px 6px 6px 12px;
   background: var(--cf-surface);
-  border-top: none;
+  border: 1px solid var(--cf-border);
+  border-radius: 16px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
 .chat-input-box {
@@ -1223,4 +1270,9 @@ body.resizing {
 
 .chat-input-box .ant-input {
   width: 100%;
+  border: none !important;
+  box-shadow: none !important;
+  background: transparent !important;
+  padding: 6px 4px;
+  resize: none;
 }
