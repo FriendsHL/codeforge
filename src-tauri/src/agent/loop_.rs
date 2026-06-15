@@ -773,6 +773,17 @@ async fn run_subagents<'a>(
         })
         .collect::<Result<_, String>>()?;
 
+    // 登记进团队看板：同步子 agent 也进同一看板，用户立刻看到这批 agent 在跑
+    let ids: Vec<String> = parsed
+        .iter()
+        .map(|(title, _, role)| {
+            let id = ctx.team.next_id();
+            ctx.team.start(&id, title, role.clone());
+            id
+        })
+        .collect();
+    on_event(AgentEvent::TeamUpdate { tasks: ctx.team.snapshot() });
+
     // 为每个子任务按其 role 准备一份子上下文（角色无效则退回通用 agent）
     let child_ctxs: Vec<AgentCtx> = parsed
         .iter()
@@ -809,14 +820,17 @@ async fn run_subagents<'a>(
     let results = futures_util::future::join_all(futures).await;
 
     let mut report = String::new();
-    for ((title, _, _), result) in parsed.iter().zip(results) {
-        let body = match result {
-            Ok(text) if !text.trim().is_empty() => text,
-            Ok(_) => "(子 agent 未给出汇报)".into(),
-            Err(e) => format!("(子 agent 执行失败: {e})"),
+    for (((title, _, _), result), id) in parsed.iter().zip(results).zip(ids.iter()) {
+        let (body, ok) = match result {
+            Ok(text) if !text.trim().is_empty() => (text, true),
+            Ok(_) => ("(子 agent 未给出汇报)".to_string(), true),
+            Err(e) => (format!("(子 agent 执行失败: {e})"), false),
         };
+        // 回填看板：完成/失败 + 该 agent 的产出（可在看板里展开看）
+        ctx.team.finish(id, if ok { Ok(body.clone()) } else { Err(body.clone()) });
         report.push_str(&format!("## 子任务: {title}\n{body}\n\n"));
     }
+    on_event(AgentEvent::TeamUpdate { tasks: ctx.team.snapshot() });
     Ok(report.trim_end().to_string())
 }
 
