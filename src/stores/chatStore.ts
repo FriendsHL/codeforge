@@ -387,7 +387,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     try {
       const { provider, model: modelId } = splitModelValue(model);
-      await sendMessage(provider, modelId, history, get().currentSessionId, get().mode, get().role, (event) => {
+      // 本回合归属的会话；若用户中途切换/新建会话，丢弃迟到的事件，避免串台到新会话
+      const turnSession = get().currentSessionId;
+      await sendMessage(provider, modelId, history, turnSession, get().mode, get().role, (event) => {
+        if (get().currentSessionId !== turnSession) return;
         switch (event.type) {
           case "textDelta":
             appendToAssistant({ content: event.text });

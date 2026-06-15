@@ -13,10 +13,20 @@ import { useChatStore } from "../../stores/chatStore";
 import { useSessionStore } from "../../stores/sessionStore";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
 
-/** "2026-06-13 23:57:18" → "06-13 23:57"（去年份与秒，更轻） */
-function shortTime(s: string): string {
-  const m = /\d{4}-(\d{2}-\d{2})[ T](\d{2}:\d{2})/.exec(s);
-  return m ? `${m[1]} ${m[2]}` : s;
+/** 相对时间，右对齐弱显（Codex 风）："刚刚/6分/3时/2天/1周/1月" */
+function relativeTime(s: string): string {
+  const t = new Date(s.replace(" ", "T")).getTime();
+  if (Number.isNaN(t)) return s;
+  const m = Math.floor((Date.now() - t) / 60000);
+  if (m < 1) return "刚刚";
+  if (m < 60) return `${m}分`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}时`;
+  const d = Math.floor(h / 24);
+  if (d < 7) return `${d}天`;
+  if (d < 30) return `${Math.floor(d / 7)}周`;
+  if (d < 365) return `${Math.floor(d / 30)}月`;
+  return `${Math.floor(d / 365)}年`;
 }
 
 function SessionRow({
@@ -46,10 +56,8 @@ function SessionRow({
       className={`session-item ${session.id === currentId ? "session-item-active" : ""}`}
       onClick={switchTo}
     >
-      <div className="session-item-main">
-        <div className="session-title">{session.title}</div>
-        <div className="session-time">{shortTime(session.updatedAt)}</div>
-      </div>
+      <span className="session-title">{session.title}</span>
+      <span className="session-time">{relativeTime(session.updatedAt)}</span>
       <Dropdown
         trigger={["click"]}
         menu={{

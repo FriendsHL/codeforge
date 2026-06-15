@@ -10,6 +10,7 @@ import {
   renameSession,
   SessionMeta,
   SessionStats,
+  stopGeneration,
 } from "../lib/ipc";
 import { useChatStore } from "./chatStore";
 import { useTeamStore } from "./teamStore";
@@ -40,6 +41,9 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   },
 
   open: async (id) => {
+    // 切走前先停掉可能在跑的回合，避免迟到事件串台到新会话
+    void stopGeneration();
+    useChatStore.setState({ streaming: false });
     const meta = get().sessions.find((s) => s.id === id);
     // 会话归属其他项目 → 联动切换工作区
     if (meta?.workspaceRoot && meta.workspaceRoot !== useWorkspaceStore.getState().root) {
@@ -69,10 +73,12 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   },
 
   startNew: () => {
+    void stopGeneration();
     useChatStore.setState({
       items: [],
       currentSessionId: null,
       error: null,
+      streaming: false,
       sessionTokens: 0,
       sessionInputTokens: 0,
       sessionCacheTokens: 0,

@@ -289,12 +289,20 @@ body.resizing {
 .project-header {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 5px 6px;
-  border-radius: 6px;
+  gap: 7px;
+  padding: 5px 10px;
+  border-radius: 8px;
   cursor: pointer;
   font-size: 13px;
   font-weight: 600;
+  color: var(--cf-text);
+}
+.project-header .ant-btn {
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.project-header:hover .ant-btn {
+  opacity: 0.5;
 }
 
 .project-header:hover {
@@ -303,13 +311,18 @@ body.resizing {
 
 .project-header-active {
   background: var(--cf-subtle);
-  color: var(--cf-accent);
 }
 
 .project-header-loose {
-  color: #999;
+  color: var(--cf-text-dim);
   cursor: default;
   font-weight: 500;
+  font-size: 11.5px;
+  letter-spacing: 0.02em;
+  margin-top: 10px;
+}
+.project-header-loose:hover {
+  background: transparent;
 }
 
 .project-name {
@@ -320,7 +333,7 @@ body.resizing {
 }
 
 .project-group .session-item {
-  margin-left: 14px;
+  margin-left: 12px;
 }
 
 .viewer-panel {
@@ -539,13 +552,14 @@ body.resizing {
   padding: 4px 8px;
 }
 
+/* 会话行（Codex 风）：单行，标题左截断 + 相对时间右对齐弱显，紧凑 */
 .session-item {
   display: flex;
   align-items: center;
-  padding: 6px 8px;
-  border-radius: 6px;
+  padding: 6px 10px;
+  border-radius: 8px;
   cursor: pointer;
-  gap: 4px;
+  gap: 8px;
 }
 
 .session-item:hover {
@@ -556,12 +570,9 @@ body.resizing {
   background: var(--cf-subtle);
 }
 
-.session-item-main {
+.session-title {
   flex: 1;
   min-width: 0;
-}
-
-.session-title {
   font-size: 13px;
   color: var(--cf-text);
   overflow: hidden;
@@ -569,25 +580,26 @@ body.resizing {
   white-space: nowrap;
 }
 
-/* 时间戳极弱：默认隐藏，悬停/选中才露出，保持侧栏清爽（Codex 气质） */
+/* 相对时间：右对齐、弱显、常驻（Codex 风） */
 .session-time {
-  font-size: 10.5px;
+  flex: none;
+  font-size: 11px;
   color: var(--cf-text-dim);
-  opacity: 0;
-  transition: opacity 0.12s;
-  margin-top: 1px;
 }
-.session-item:hover .session-time,
-.session-item-active .session-time {
-  opacity: 1;
+/* 悬停露出 ⋮ 时，时间让位（避免拥挤） */
+.session-item:hover .session-time {
+  display: none;
 }
 /* 菜单按钮默认隐藏，悬停露出 */
 .session-item .ant-btn {
+  flex: none;
   opacity: 0;
+  width: 0;
   transition: opacity 0.12s;
 }
 .session-item:hover .ant-btn {
-  opacity: 0.55;
+  opacity: 0.5;
+  width: auto;
 }
 
 .chat-status {
