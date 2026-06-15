@@ -852,6 +852,64 @@ body.resizing {
   gap: 12px;
 }
 
+/* 新对话欢迎态（Codex 风）：居中大标题 + 快捷起步卡片 */
+.chat-welcome {
+  margin: auto;
+  max-width: 720px;
+  width: 100%;
+  padding: 24px 16px;
+  text-align: center;
+}
+.welcome-title {
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--cf-text);
+}
+.welcome-sub {
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--cf-text-dim);
+}
+.welcome-cards {
+  margin-top: 28px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+}
+.welcome-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  padding: 14px 16px;
+  border: 1px solid var(--cf-border);
+  border-radius: 12px;
+  background: var(--cf-surface);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.12s, transform 0.06s;
+  font: inherit;
+}
+.welcome-card:hover {
+  border-color: var(--cf-border-strong);
+}
+.welcome-card:active {
+  transform: translateY(1px);
+}
+.welcome-card-icon {
+  font-size: 18px;
+}
+.welcome-card-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--cf-text);
+}
+.welcome-card-desc {
+  font-size: 12px;
+  color: var(--cf-text-dim);
+}
+
 .chat-bubble {
   max-width: 80%;
   padding: 10px 14px;

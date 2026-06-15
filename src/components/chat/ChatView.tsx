@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Alert, App, Button, Empty, Input, Segmented, Select, Tag, Tooltip } from "antd";
+import { Alert, App, Button, Input, Segmented, Select, Tag, Tooltip } from "antd";
 import { ArrowUpOutlined, ClearOutlined, StopOutlined } from "@ant-design/icons";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -192,7 +192,47 @@ export function ChatView() {
   return (
     <div className="chat-view">
       <div className="chat-messages" ref={scrollRef}>
-        {items.length === 0 && <Empty description={emptyHint} style={{ marginTop: "20vh" }} />}
+        {items.length === 0 && (
+          <div className="chat-welcome">
+            <div className="welcome-title">
+              {hasWorkspace ? `在 ${workspaceName} 里，我们做点什么？` : "今天想做点什么？"}
+            </div>
+            <div className="welcome-sub">{emptyHint}</div>
+            <div className="welcome-cards">
+              {(hasWorkspace
+                ? [
+                    { icon: "🧭", title: "了解项目", desc: "架构与主要模块", prompt: "这个项目是做什么的？整体架构和主要模块讲一下。" },
+                    { icon: "📝", title: "最近改动", desc: "看看改了啥", prompt: "用 git 看看最近改了哪些文件，讲讲这些变更。" },
+                    { icon: "🔍", title: "找问题", desc: "可优化/重构点", prompt: "帮我审一遍代码，有哪些可优化、重构或潜在 bug 的地方？" },
+                    { icon: "📚", title: "深度调研", desc: "带引用的结论", prompt: "帮我调研：", fill: true },
+                  ]
+                : [
+                    { icon: "📂", title: "打开项目", desc: "选个目录开始", prompt: "", openProject: true },
+                    { icon: "💡", title: "问点什么", desc: "随便聊聊", prompt: "你能做什么？给我几个用法示例。" },
+                    { icon: "📚", title: "深度调研", desc: "带引用的结论", prompt: "帮我调研：", fill: true },
+                  ]
+              ).map((s) => (
+                <button
+                  key={s.title}
+                  className="welcome-card"
+                  onClick={() => {
+                    if ("openProject" in s && s.openProject) {
+                      void useWorkspaceStore.getState().openWorkspace();
+                    } else if ("fill" in s && s.fill) {
+                      setDraft(s.prompt);
+                    } else {
+                      void send(s.prompt, []);
+                    }
+                  }}
+                >
+                  <span className="welcome-card-icon">{s.icon}</span>
+                  <span className="welcome-card-title">{s.title}</span>
+                  <span className="welcome-card-desc">{s.desc}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         {toBlocks(items).map((block) => {
           if (block.type === "subagents") {
             return <SubagentGroup key={block.key} items={block.items} />;
