@@ -1,14 +1,17 @@
-import { useState } from "react";
-import { App, Button, Dropdown, Empty, Input, Modal, Tooltip } from "antd";
+import { useEffect, useMemo, useState } from "react";
+import { App, Button, Dropdown, Empty, Input, Modal } from "antd";
 import {
+  ApiOutlined,
   DeleteOutlined,
   EditOutlined,
   FolderOpenOutlined,
   FolderOutlined,
+  FormOutlined,
   MoreOutlined,
-  PlusOutlined,
+  SearchOutlined,
+  ToolOutlined,
 } from "@ant-design/icons";
-import type { SessionMeta } from "../../lib/ipc";
+import { listCapabilities, type Capabilities, type SessionMeta } from "../../lib/ipc";
 import { useChatStore } from "../../stores/chatStore";
 import { useSessionStore } from "../../stores/sessionStore";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
@@ -92,12 +95,98 @@ function SessionRow({
   );
 }
 
+/** 搜索会话弹窗 */
+function SearchModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const { sessions, open: openSession } = useSessionStore();
+  const [q, setQ] = useState("");
+  useEffect(() => {
+    if (open) setQ("");
+  }, [open]);
+  const hits = useMemo(() => {
+    const kw = q.trim().toLowerCase();
+    const list = kw ? sessions.filter((s) => s.title.toLowerCase().includes(kw)) : sessions;
+    return list.slice(0, 50);
+  }, [q, sessions]);
+
+  return (
+    <Modal open={open} onCancel={onClose} footer={null} title="搜索会话" width={520}>
+      <Input
+        autoFocus
+        prefix={<SearchOutlined />}
+        placeholder="按标题搜索…"
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        allowClear
+      />
+      <div className="search-results">
+        {hits.length === 0 && <div className="search-empty">没有匹配的会话</div>}
+        {hits.map((s) => (
+          <div
+            key={s.id}
+            className="search-result-item"
+            onClick={() => {
+              void openSession(s.id);
+              onClose();
+            }}
+          >
+            <span className="search-result-title">{s.title}</span>
+            <span className="search-result-time">{s.updatedAt.slice(5, 16)}</span>
+          </div>
+        ))}
+      </div>
+    </Modal>
+  );
+}
+
+/** 插件弹窗：当前可用的工具与技能 */
+function PluginsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [caps, setCaps] = useState<Capabilities | null>(null);
+  useEffect(() => {
+    if (open) {
+      setCaps(null);
+      void listCapabilities().then(setCaps).catch(() => setCaps({ tools: [], skills: [] }));
+    }
+  }, [open]);
+
+  return (
+    <Modal open={open} onCancel={onClose} footer={null} title="插件 · 工具与技能" width={560}>
+      <div className="plugins-body">
+        <div className="plugins-section-title">
+          <ToolOutlined /> 工具 {caps ? `(${caps.tools.length})` : ""}
+        </div>
+        {caps?.tools.map((t) => (
+          <div key={t.name} className="plugins-item">
+            <span className="plugins-item-name">{t.name}</span>
+            <span className="plugins-item-desc">{t.description}</span>
+          </div>
+        ))}
+        <div className="plugins-section-title" style={{ marginTop: 16 }}>
+          <ApiOutlined /> 技能 {caps ? `(${caps.skills.length})` : ""}
+        </div>
+        {caps && caps.skills.length === 0 && (
+          <div className="search-empty">
+            暂无技能。在 ~/.codeforge/skills/&lt;名&gt;/SKILL.md 添加即可被自动发现。
+          </div>
+        )}
+        {caps?.skills.map((s) => (
+          <div key={s.name} className="plugins-item">
+            <span className="plugins-item-name">{s.name}</span>
+            <span className="plugins-item-desc">{s.description}</span>
+          </div>
+        ))}
+        {!caps && <div className="search-empty">加载中…</div>}
+      </div>
+    </Modal>
+  );
+}
+
 export function ProjectsPanel() {
   const { message, modal } = App.useApp();
   const { sessions, projects, rename, startNew, forgetProject } = useSessionStore();
   const { root, openWorkspace, switchTo } = useWorkspaceStore();
-  const streaming = useChatStore((s) => s.streaming);
   const [renaming, setRenaming] = useState<{ id: number; title: string } | null>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [pluginsOpen, setPluginsOpen] = useState(false);
 
   const sessionsOf = (projectRoot: string) =>
     sessions.filter((s) => s.workspaceRoot === projectRoot);
@@ -107,16 +196,24 @@ export function ProjectsPanel() {
 
   return (
     <aside className="projects-panel">
-      <div className="projects-actions">
-        <Button type="text" size="small" icon={<FolderOpenOutlined />} onClick={() => void openWorkspace()}>
-          打开项目
-        </Button>
-        <Tooltip title="在当前项目下开新会话">
-          <Button type="text" size="small" icon={<PlusOutlined />} onClick={startNew} disabled={streaming}>
-            新会话
-          </Button>
-        </Tooltip>
-      </div>
+      <nav className="side-nav">
+        <button className="nav-item" onClick={startNew}>
+          <FormOutlined />
+          <span>新对话</span>
+        </button>
+        <button className="nav-item" onClick={() => setSearchOpen(true)}>
+          <SearchOutlined />
+          <span>搜索</span>
+        </button>
+        <button className="nav-item" onClick={() => setPluginsOpen(true)}>
+          <ApiOutlined />
+          <span>插件</span>
+        </button>
+        <button className="nav-item" onClick={() => void openWorkspace()}>
+          <FolderOpenOutlined />
+          <span>打开项目</span>
+        </button>
+      </nav>
 
       <div className="projects-scroll">
         {projects.length === 0 && looseSessions.length === 0 && (
@@ -200,6 +297,9 @@ export function ProjectsPanel() {
           onChange={(e) => setRenaming((r) => (r ? { ...r, title: e.target.value } : r))}
         />
       </Modal>
+
+      <SearchModal open={searchOpen} onClose={() => setSearchOpen(false)} />
+      <PluginsModal open={pluginsOpen} onClose={() => setPluginsOpen(false)} />
     </aside>
   );
 }
