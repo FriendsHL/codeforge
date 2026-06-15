@@ -195,26 +195,29 @@ pub fn delete_role(scope: &str, workspace: Option<&Path>, name: &str) -> Result<
 
 /// 首次运行把内置角色落成真实文件到 ~/.codeforge/agents，之后用户删/改不再覆盖。
 /// 用 .seeded 哨兵记录已播种，尊重用户后续的删除。
+/// 内置角色版本：每次改了 builtin/*.md 内容就 +1，触发对内置角色文件的重新同步。
+const BUILTIN_VERSION: &str = "2";
+
 pub fn seed_builtins() {
     let Some(dir) = global_agents_dir() else { return };
     let sentinel = dir.join(".seeded");
-    if sentinel.exists() {
+    // 版本未变则不动（尊重用户对自定义角色的改动）
+    if std::fs::read_to_string(&sentinel).ok().as_deref().map(str::trim) == Some(BUILTIN_VERSION) {
         return;
     }
     if std::fs::create_dir_all(&dir).is_err() {
         return;
     }
+    // 版本变化：重新写入内置角色文件（仅这 5 个 app 自带的名字，用户自定义的其他角色不动）。
+    // 注意会覆盖用户对内置角色的手改——内置角色属 app 所有，要定制建议另起名字。
     for (name, content) in BUILTIN {
         let path = dir.join(name).join("AGENT.md");
-        if path.exists() {
-            continue;
-        }
         if let Some(p) = path.parent() {
             let _ = std::fs::create_dir_all(p);
         }
         let _ = std::fs::write(&path, content);
     }
-    let _ = std::fs::write(&sentinel, "codeForge 已把内置角色落地为可编辑文件，删此文件可重新播种\n");
+    let _ = std::fs::write(&sentinel, BUILTIN_VERSION);
 }
 
 /// 按名取角色
