@@ -13,7 +13,6 @@ import { useGitStore } from "./gitStore";
 import { useSessionStore } from "./sessionStore";
 import { useTeamStore } from "./teamStore";
 import { useTodoStore } from "./todoStore";
-import { useViewerStore } from "./viewerStore";
 
 const SLASH_HELP = `可用快捷命令：
 - \`/tools\` 当前可用工具清单
@@ -410,9 +409,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
               return items;
             });
             if (event.name === "bash") {
+              // 只写进终端缓冲，不再自动弹出终端面板（避免刷屏）；用户想看可手动开终端 tab
               const cmd = (event.input as { command?: string })?.command ?? "";
               termWrite(`\r\n\x1b[1;33m$ ${cmd}\x1b[0m\r\n`);
-              useViewerStore.getState().openTerminal();
             }
             break;
           case "commandOutput":
