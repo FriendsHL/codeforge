@@ -432,19 +432,15 @@ async fn loop_body(
                     history.push(HistoryItem::User(format!("📩 协调者指令：{instruction}")));
                 }
             }
-            // 轮内压缩：先微压缩（重复读去重，无损），再按预算清理旧结果
+            // 轮内压缩：按预算清理超量的旧工具结果。
+            // 注：曾有 dedup_reads（重复读去重）微压缩，但它把早前 read 结果替换成占位符，
+            // 反而诱导 weak 模型"以为内容丢了"→ 反复重读同一文件（死循环），已移除。
             if iteration > 0 {
-                let deduped = dedup_reads(&mut history);
                 let pruned = prune_tool_results(&mut history);
-                if (deduped + pruned) > 0 && is_main {
-                    let mut parts = Vec::new();
-                    if deduped > 0 {
-                        parts.push(format!("去重 {deduped} 次重复读取"));
-                    }
-                    if pruned > 0 {
-                        parts.push(format!("清理 {pruned} 个超预算的较早结果"));
-                    }
-                    on_event(AgentEvent::ContextCompacted { note: parts.join("，") });
+                if pruned > 0 && is_main {
+                    on_event(AgentEvent::ContextCompacted {
+                        note: format!("清理 {pruned} 个超预算的较早结果"),
+                    });
                 }
             }
             if is_cancelled(ctx) {
@@ -1177,62 +1173,6 @@ fn prune_tool_results(history: &mut [HistoryItem]) -> usize {
     pruned
 }
 
-/// 微压缩：同一文件被 read_file 多次时，只有最后一次内容是当前的。
-/// 把更早的那几次结果替换为指向最新版本的占位，无损地省下重复正文。
-/// 返回被去重的条数。
-fn dedup_reads(history: &mut [HistoryItem]) -> usize {
-    // call_id → 它读的文件路径（只看 read_file 调用）
-    let mut read_call_path: std::collections::HashMap<String, String> =
-        std::collections::HashMap::new();
-    for item in history.iter() {
-        if let HistoryItem::Assistant { tool_calls, .. } = item {
-            for c in tool_calls {
-                if c.name == "read_file" {
-                    if let Some(p) = tool_path(c) {
-                        read_call_path.insert(c.id.clone(), p);
-                    }
-                }
-            }
-        }
-    }
-
-    // 每个路径最后一次成功 read 的结果下标 → 受保护，其余去重
-    let mut latest: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-    for (idx, item) in history.iter().enumerate() {
-        if let HistoryItem::ToolResult { call_id, content, is_error, .. } = item {
-            if *is_error || content.starts_with(PRUNED_MARK) {
-                continue;
-            }
-            if let Some(path) = read_call_path.get(call_id) {
-                latest.insert(path.clone(), idx);
-            }
-        }
-    }
-
-    let mut deduped = 0usize;
-    for idx in 0..history.len() {
-        let path = match &history[idx] {
-            HistoryItem::ToolResult { call_id, content, is_error, .. }
-                if !*is_error && !content.starts_with(PRUNED_MARK) =>
-            {
-                read_call_path.get(call_id).cloned()
-            }
-            _ => None,
-        };
-        let Some(path) = path else { continue };
-        if latest.get(&path) == Some(&idx) {
-            continue; // 最新一次，保留
-        }
-        if let HistoryItem::ToolResult { content, .. } = &mut history[idx] {
-            *content = format!(
-                "{PRUNED_MARK} {path} 的这次读取已被后续更新的 read_file 取代，正文以最新一次为准"
-            );
-            deduped += 1;
-        }
-    }
-    deduped
-}
-
 fn preview(content: &str) -> String {
     if content.chars().count() <= EVENT_OUTPUT_PREVIEW_CHARS {
         content.to_string()
@@ -1596,52 +1536,6 @@ mod tests {
         let before = history.len();
         prune_tool_results(&mut history);
         assert_eq!(history.len(), before);
-    }
-
-    fn read_call(id: &str, path: &str) -> ToolCall {
-        ToolCall { id: id.into(), name: "read_file".into(), arguments: format!("{{\"path\":\"{path}\"}}") }
-    }
-
-    fn read_result(call_id: &str, content: &str) -> HistoryItem {
-        HistoryItem::ToolResult {
-            call_id: call_id.into(),
-            name: "read_file".into(),
-            content: content.into(),
-            is_error: false,
-        }
-    }
-
-    #[test]
-    fn dedup_reads_keeps_only_latest_per_file() {
-        let mut history = vec![
-            HistoryItem::Assistant { text: String::new(), tool_calls: vec![read_call("c1", "a.rs")] },
-            read_result("c1", "first version of a.rs"),
-            HistoryItem::Assistant { text: String::new(), tool_calls: vec![read_call("c2", "b.rs")] },
-            read_result("c2", "content of b.rs"),
-            HistoryItem::Assistant { text: String::new(), tool_calls: vec![read_call("c3", "a.rs")] },
-            read_result("c3", "second version of a.rs"),
-        ];
-        let n = dedup_reads(&mut history);
-        assert_eq!(n, 1, "a.rs 读了两次，第一次应被去重");
-        match &history[1] {
-            HistoryItem::ToolResult { content, .. } => {
-                assert!(content.starts_with(PRUNED_MARK), "旧读取应被替换为占位");
-                assert!(content.contains("a.rs"));
-            }
-            _ => panic!(),
-        }
-        // b.rs 唯一一次读取，保留
-        match &history[3] {
-            HistoryItem::ToolResult { content, .. } => assert_eq!(content, "content of b.rs"),
-            _ => panic!(),
-        }
-        // a.rs 最新一次读取，保留
-        match &history[5] {
-            HistoryItem::ToolResult { content, .. } => assert_eq!(content, "second version of a.rs"),
-            _ => panic!(),
-        }
-        // 幂等
-        assert_eq!(dedup_reads(&mut history), 0);
     }
 
     #[test]
